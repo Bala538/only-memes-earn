@@ -45,7 +45,6 @@
     "@typescript-eslint/eslint-plugin": "^8.56.0",
     "@typescript-eslint/parser": "^8.56.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "canvas": "^3.2.3",
     "eslint": "^9.0.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",

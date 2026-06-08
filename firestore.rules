@@ -8,8 +8,13 @@ service cloud.firestore {
 
     // --- Helpers ---
     function isSignedIn() { return request.auth != null; }
-    function getUserData(email) { return get(/databases/$(database)/documents/users/$(email)).data; }
-    function isAdmin() { return isSignedIn() && getUserData(request.auth.token.email).isAdmin == true; }
+    function isAdmin() {
+      return isSignedIn() &&
+             request.auth.token != null &&
+             request.auth.token.email != null &&
+             exists(/databases/$(database)/documents/users/$(request.auth.token.email)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.get('isAdmin', false) == true;
+    }
     function isOwner(email) { return isSignedIn() && request.auth.token.email == email; }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }

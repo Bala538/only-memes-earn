@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Only Memes Earn</string>
+    <string name="title_activity_main">Only Memes Earn</string>
+    <string name="package_name">com.onlymemes.app</string>
+    <string name="custom_url_scheme">com.onlymemes.app</string>
+</resources>

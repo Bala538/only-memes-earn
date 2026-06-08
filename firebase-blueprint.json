@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the application.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "balance": { "type": "object" },
+        "openOrders": { "type": "array" },
+        "withdrawals": { "type": "array" },
+        "isAdmin": { "type": "boolean" },
+        "isBlocked": { "type": "boolean" }
+      }
+    },
+    "Market": {
+      "title": "Market",
+      "description": "A trading pair market.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "base": { "type": "string" },
+        "quote": { "type": "string" },
+        "price": { "type": "number" },
+        "volume": { "type": "number" },
+        "bids": { "type": "array" },
+        "asks": { "type": "array" },
+        "trades": { "type": "array" },
+        "candles": { "type": "array" }
+      }
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A task that users can complete to earn rewards.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "reward": { "type": "number" },
+        "rewardToken": { "type": "string" },
+        "url": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles and account data"
+    },
+    "/markets/{marketId}": {
+      "schema": { "$ref": "#/entities/Market" },
+      "description": "Market pairs and order books"
+    },
+    "/youtubeTasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "YouTube tasks"
+    },
+    "/telegramTasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Telegram tasks"
+    },
+    "/banners/{bannerId}": {
+      "schema": { "type": "object" },
+      "description": "App banners"
+    }
+  }
+}

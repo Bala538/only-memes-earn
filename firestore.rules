@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function getUserData(email) { return get(/databases/$(database)/documents/users/$(email)).data; }
+    function isAdmin() { return isSignedIn() && getUserData(request.auth.token.email).isAdmin == true; }
+    function isOwner(email) { return isSignedIn() && request.auth.token.email == email; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // --- User Rules ---
+    match /users/{email} {
+      allow get: if isOwner(email) || isAdmin();
+      allow list: if isAdmin();
+      
+      function isValidUser(data) {
+        return data.email is string && 
+               data.email.size() <= 100 &&
+               data.balance is map &&
+               (data.balance.keys().size() <= 30) &&
+               (data.isAdmin == false || isAdmin()) &&
+               (data.isBlocked == false || isAdmin());
+      }
+
+      allow create: if isOwner(email) && isValidUser(incoming()) && (
+        incoming().isAdmin == false && 
+        incoming().get('isBlocked', false) == false &&
+        incoming().balance.keys().size() <= 1
+      );
+
+      allow update: if (isOwner(email) || isAdmin()) && isValidUser(incoming()) && (
+        isAdmin() || (
+          // Safe updates: prevent modification of identity/access control fields
+          incoming().isAdmin == existing().isAdmin &&
+          incoming().get('isBlocked', false) == existing().get('isBlocked', false) &&
+          incoming().email == existing().email
+        )
+      );
+    }
+
+    // --- Market Rules ---
+    match /markets/{marketId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // --- Task Rules ---
+    match /youtubeTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
+    match /telegramTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
+    match /facebookTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
+    match /instagramTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
+    match /twitterTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
+    match /tiktokTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
+    match /appDownloadTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
+    match /otherTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
+
+    // --- Global Configs & Banners ---
+    match /banners/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /configs/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /promoCodes/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /mineUpgrades/{id} { allow read: if true; allow write: if isAdmin(); }
+  }
+}

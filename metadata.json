@@ -1,0 +1,6 @@
+{
+  "name": "OnlyMemesEarn",
+  "description": "The ultimate meme-to-earn platform. Earn BabyDoge and other tokens by watching videos, playing games, and completing tasks. Features a real-time meme asset exchange, order books, secure trading, referral program, and withdrawals. Includes advanced admin tools for content and user management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

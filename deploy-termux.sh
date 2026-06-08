@@ -43,7 +43,7 @@ fi
 
 # 5. Deploy to Firebase Hosting
 echo -e "${YELLOW}Deploying to Firebase Hosting...${NC}"
-npx -p firebase-tools firebase deploy --only hosting
+npx -p firebase-tools firebase deploy --only hosting --project only-memes-earn
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}🎉 Deploy complete! Your live site is updated.${NC}"
 else

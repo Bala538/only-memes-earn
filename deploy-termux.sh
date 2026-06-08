@@ -43,10 +43,10 @@ fi
 
 # 5. Deploy to Firebase Hosting
 echo -e "${YELLOW}Deploying to Firebase Hosting...${NC}"
-npx firebase deploy --only hosting
+npx -p firebase-tools firebase deploy --only hosting
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}🎉 Deploy complete! Your live site is updated.${NC}"
 else
-    echo -e "${RED}❌ Deployment failed. Make sure you are logged in using 'npx firebase login'.${NC}"
+    echo -e "${RED}❌ Deployment failed. Make sure you are logged in using 'npx -p firebase-tools firebase login'.${NC}"
     exit 1
 fi

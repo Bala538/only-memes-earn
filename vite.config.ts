@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
           includeAssets: ['/icons/icon-192x192.png', '/icons/icon-512x512.png'],
           workbox: {
             maximumFileSizeToCacheInBytes: 3000000, // 3MB
+            mode: 'development', // Disables Terser minification in the Service Worker compilation to avoid Out Of Memory crashes on Termux
           },
           manifest: {
             name: 'Only Memes Earn',

@@ -43,6 +43,35 @@
         "rewardToken": { "type": "string" },
         "url": { "type": "string" }
       }
+    },
+    "Video": {
+      "title": "Video",
+      "description": "A video that users can watch to earn rewards.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "url": { "type": "string" },
+        "rewardToken": { "type": "string" },
+        "rewardPerSecond": { "type": "number" },
+        "timerInSeconds": { "type": "number" }
+      }
+    },
+    "Game": {
+      "title": "Game",
+      "description": "A game that users can play to earn rewards.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "gameUrl": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "reward": { "type": "number" },
+        "rewardToken": { "type": "string" },
+        "timerSeconds": { "type": "number" }
+      }
     }
   },
   "firestore": {
@@ -53,6 +82,14 @@
     "/markets/{marketId}": {
       "schema": { "$ref": "#/entities/Market" },
       "description": "Market pairs and order books"
+    },
+    "/videos/{videoId}": {
+      "schema": { "$ref": "#/entities/Video" },
+      "description": "Video list configured by admin"
+    },
+    "/games/{gameId}": {
+      "schema": { "$ref": "#/entities/Game" },
+      "description": "Game list configured by admin"
     },
     "/youtubeTasks/{taskId}": {
       "schema": { "$ref": "#/entities/Task" },

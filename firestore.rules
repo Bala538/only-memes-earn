@@ -50,6 +50,16 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // --- Videos and Games Rules ---
+    match /videos/{videoId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /games/{gameId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // --- Task Rules ---
     match /youtubeTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
     match /telegramTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }

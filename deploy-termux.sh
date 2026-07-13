@@ -36,11 +36,9 @@ else
     echo -e "${YELLOW}⚠️ Git main repository not initialized. Skipping git pull.${NC}"
 fi
 
-# 3. Install packages if node_modules doesn't exist
-if [ ! -d "node_modules" ]; then
-    echo -e "${YELLOW}node_modules not found. Installing dependencies...${NC}"
-    npm install || { echo -e "${RED}❌ npm install failed! Check errors.${NC}"; exit 1; }
-fi
+# 3. Install/Verify packages
+echo -e "${YELLOW}Installing and verifying dependencies (this ensures everything is up-to-date)...${NC}"
+npm install || { echo -e "${RED}❌ npm install failed! Check errors.${NC}"; exit 1; }
 
 # 4. Build the application
 echo -e "${YELLOW}Building the static applet...${NC}"

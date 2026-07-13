@@ -17,6 +17,17 @@ cd "$SCRIPT_DIR" || exit 1
 
 echo -e "${GREEN}✓ Switched to app directory: $SCRIPT_DIR${NC}"
 
+# Check if Node.js & npm are installed in the environment
+if ! command -v npm &> /dev/null; then
+    echo -e "${RED}❌ Error: Node.js/npm is not installed!${NC}"
+    echo -e "${YELLOW}To install Node.js in Termux, run this command:${NC}"
+    echo -e ""
+    echo -e "    ${BLUE}pkg install nodejs${NC}"
+    echo -e ""
+    echo -e "${YELLOW}Once installed, run ./deploy-termux.sh again.${NC}"
+    exit 1
+fi
+
 # 2. Pull latest code from GitHub
 if [ -d ".git" ]; then
     echo -e "${YELLOW}Pulling latest changes from GitHub...${NC}"
@@ -43,10 +54,29 @@ fi
 
 # 5. Deploy to Firebase Hosting
 echo -e "${YELLOW}Deploying to Firebase Hosting...${NC}"
-npx -p firebase-tools firebase deploy --only hosting --project only-memes-earn
+if [ -n "$FIREBASE_TOKEN" ]; then
+    echo -e "${GREEN}Using provided FIREBASE_TOKEN for deployment...${NC}"
+    npx -p firebase-tools firebase deploy --only hosting --project only-memes-earn --token "$FIREBASE_TOKEN"
+else
+    npx -p firebase-tools firebase deploy --only hosting --project only-memes-earn
+fi
+
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}🎉 Deploy complete! Your live site is updated.${NC}"
 else
-    echo -e "${RED}❌ Deployment failed. Make sure you are logged in using 'npx -p firebase-tools firebase login'.${NC}"
+    echo -e "${RED}❌ Deployment failed!${NC}"
+    echo -e "${YELLOW}👉 This is likely due to an expired/stale Firebase CLI session in Termux.${NC}"
+    echo -e "${YELLOW}To fix this, please run this single command to force a fresh re-authentication session:${NC}"
+    echo -e ""
+    echo -e "${BLUE}npx -p firebase-tools firebase login --reauth --no-localhost${NC}"
+    echo -e ""
+    echo -e "${YELLOW}👉 If that still fails, run this line to wipe the stale configuration completely and log in again:${NC}"
+    echo -e "${BLUE}rm -rf ~/.config/configstore/firebase-tools.json && npx -p firebase-tools firebase login --reauth --no-localhost${NC}"
+    echo -e ""
+    echo -e "${YELLOW}👉 Alternatively, if standard login continues to have issues, use login:ci to obtain a token:${NC}"
+    echo -e "${BLUE}npx -p firebase-tools firebase login:ci --no-localhost${NC}"
+    echo -e ""
+    echo -e "${YELLOW}Copy the generated token, and then run the deploy script with it:${NC}"
+    echo -e "${BLUE}FIREBASE_TOKEN=\"your_ci_token_here\" ./deploy-termux.sh${NC}"
     exit 1
 fi

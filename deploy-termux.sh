@@ -38,12 +38,12 @@ fi
 
 # 3. Install/Verify packages
 echo -e "${YELLOW}Installing and verifying dependencies (this ensures everything is up-to-date)...${NC}"
-npm install || { echo -e "${RED}❌ npm install failed! Check errors.${NC}"; exit 1; }
+npm install --legacy-peer-deps || { echo -e "${RED}❌ npm install failed! Check errors.${NC}"; exit 1; }
 
 # Force-verify essential dependencies
 if [ ! -d "node_modules/canvas-confetti" ]; then
     echo -e "${YELLOW}⚠️ canvas-confetti not found in node_modules. Attempting explicit installation...${NC}"
-    npm install canvas-confetti || echo -e "${RED}⚠️ Explicit canvas-confetti installation failed, proceeding anyway...${NC}"
+    npm install canvas-confetti --legacy-peer-deps || echo -e "${RED}⚠️ Explicit canvas-confetti installation failed, proceeding anyway...${NC}"
 fi
 
 # Clear Vite cache to avoid stale pre-bundled files
@@ -62,7 +62,7 @@ else
     echo -e "${YELLOW}👉 If you see dependency resolution errors (like 'failed to resolve import \"canvas-confetti\"'),${NC}"
     echo -e "${YELLOW}running this command in Termux usually fixes it by forcing a fresh clean install of all packages:${NC}"
     echo -e ""
-    echo -e "    ${BLUE}rm -rf node_modules package-lock.json && npm cache clean --force && npm install${NC}"
+    echo -e "    ${BLUE}rm -rf node_modules package-lock.json && npm cache clean --force && npm install --legacy-peer-deps${NC}"
     echo -e ""
     exit 1
 fi

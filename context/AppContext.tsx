@@ -1,7 +1,7 @@
 
 import { createContext } from 'react';
 import { AppState, AppAction, UserData, Token, Video, Game, Banner, PromoCode, 
-    YouTubeTask, TelegramTask, FacebookTask, InstagramTask, TwitterTask, TikTokTask, AppDownloadTask,
+    YouTubeTask, FacebookTask, InstagramTask, TwitterTask, TikTokTask, AppDownloadTask,
     WithdrawalSetting, ReferralConfig, AirdropConfig, MineUpgrade, AuthConfig, AdsConfig,
     Proof, Withdrawal, AppNotification, MarketPair, OtherTask
 } from '../types';
@@ -11,8 +11,10 @@ export interface AppContextType {
     dispatch: React.Dispatch<AppAction>;
     login: (email: string, pass: string) => Promise<void>;
     register: (email: string, pass: string) => Promise<void>;
+    sendSignInLink: (email: string) => Promise<any>;
     loginWithGoogle: () => Promise<void>;
     loginWithFacebook: () => Promise<void>;
+    loginAsGuest: () => Promise<void>;
     logout: () => Promise<void>;
     resendVerificationEmail: () => Promise<void>;
     resetPassword: (email: string) => Promise<void>;
@@ -27,7 +29,6 @@ export interface AppContextType {
     cancelTask: (taskId: string, taskType: string) => Promise<void>;
     submitVideoProof: (videoId: string, title: string, proofUrl: string, reward: number, token: Token, code?: string) => Promise<void>;
     submitYouTubeProof: (taskId: string, title: string, proofUrl: string, reward: number, token: Token, code?: string) => Promise<void>;
-    submitTelegramProof: (taskId: string, title: string, proofUrl: string, reward: number, token: Token, code?: string) => Promise<void>;
     submitFacebookProof: (taskId: string, title: string, proofUrl: string, reward: number, token: Token, code?: string) => Promise<void>;
     submitInstagramProof: (taskId: string, title: string, proofUrl: string, reward: number, token: Token, code?: string) => Promise<void>;
     submitTwitterProof: (taskId: string, title: string, proofUrl: string, reward: number, token: Token, code?: string) => Promise<void>;
@@ -36,9 +37,9 @@ export interface AppContextType {
     submitOtherProof: (taskId: string, title: string, proofUrl: string, reward: number, token: Token, code?: string) => Promise<void>;
     submitDepositProof: (depositId: string, title: string, proofUrl: string, amount: number, token: Token) => Promise<void>;
     
-    claimTaskReward: (taskId: string, taskType: string, ignoreTimer?: boolean) => Promise<void>;
+    claimTaskReward: (taskId: string, taskType: string, reward?: number, rewardToken?: Token, taskTitle?: string) => Promise<void>;
 
-    initiateWithdrawal: (address: string, token: Token, amount: number, method: Withdrawal['method'], exchange?: string) => Promise<string>;
+    initiateWithdrawal: (address: string, token: Token, amount: number, method: Withdrawal['method'], exchange?: string, gameUid?: string, uidScreenshotUrl?: string) => Promise<string>;
     swapBalance: (fromToken: Token, toToken: Token, fromAmount: number, toAmount: number) => Promise<void>;
     applyReferralCode: (code: string) => Promise<void>;
     redeemPromoCode: (code: string) => Promise<{ reward: number; token: Token }>;
@@ -65,9 +66,6 @@ export interface AppContextType {
     addYouTubeTask: (task: YouTubeTask) => Promise<void>;
     updateYouTubeTask: (task: YouTubeTask) => Promise<void>;
     removeYouTubeTask: (taskId: string) => Promise<void>;
-    addTelegramTask: (task: TelegramTask) => Promise<void>;
-    updateTelegramTask: (task: TelegramTask) => Promise<void>;
-    removeTelegramTask: (taskId: string) => Promise<void>;
     addFacebookTask: (task: FacebookTask) => Promise<void>;
     updateFacebookTask: (task: FacebookTask) => Promise<void>;
     removeFacebookTask: (taskId: string) => Promise<void>;
@@ -112,8 +110,6 @@ export interface AppContextType {
     adminRejectProof: (userEmail: string, videoId: string) => Promise<void>;
     adminApproveYouTubeProof: (userEmail: string, taskId: string) => Promise<void>;
     adminRejectYouTubeProof: (userEmail: string, taskId: string) => Promise<void>;
-    adminApproveTelegramProof: (userEmail: string, taskId: string) => Promise<void>;
-    adminRejectTelegramProof: (userEmail: string, taskId: string) => Promise<void>;
     adminApproveFacebookProof: (userEmail: string, taskId: string) => Promise<void>;
     adminRejectFacebookProof: (userEmail: string, taskId: string) => Promise<void>;
     adminApproveInstagramProof: (userEmail: string, taskId: string) => Promise<void>;
@@ -135,6 +131,12 @@ export interface AppContextType {
     adminUpdateWithdrawalStatus: (userEmail: string, id: string, status: Withdrawal['status']) => Promise<void>;
     adminUpdateUserBalance: (userEmail: string, token: string, newBalance: number) => Promise<void>;
     adminToggleUserBlock: (userEmail: string, block: boolean, uid?: string) => Promise<void>;
+    adminUpdateExchanges: (exchanges: { name: string; enabled: boolean }[]) => Promise<void>;
+    adminApproveUserUid: (userEmail: string, verifiedUid: string, exchangeName?: string) => Promise<void>;
+    adminRejectUserUid: (userEmail: string, exchangeName?: string) => Promise<void>;
+    adminReverifyUserUid: (userEmail: string, exchangeName?: string) => Promise<void>;
+    adminDeleteUser: (userEmail: string) => Promise<void>;
+    submitUidForVerification: (uid: string, screenshotUrl: string, exchange?: string) => Promise<void>;
     
     toggleTheme: () => void;
     addBalance: (amount: number, token: Token) => Promise<void>;

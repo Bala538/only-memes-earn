@@ -1,11 +1,10 @@
 
-import React, { useState, useEffect, useContext, useMemo, ChangeEvent } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { AppContext } from '../../context/AppContext';
 import { Withdrawal, UserData, Token, WithdrawalSetting } from '../../types';
 import HistoryIcon from '../icons/HistoryIcon';
 import TokenIcon from '../icons/TokenIcon';
 import UsersIcon from '../icons/UsersIcon';
-import UploadIcon from '../icons/UploadIcon';
 
 interface AggregatedWithdrawal extends Withdrawal {
     userEmail: string;
@@ -73,16 +72,60 @@ const WithdrawalStatusChanger: React.FC<{ withdrawal: AggregatedWithdrawal }> = 
 };
 
 const WithdrawalManager: React.FC = () => {
-    const { state, adminUpdateWithdrawalSettings } = useContext(AppContext);
+    const { state, adminUpdateWithdrawalSettings, adminUpdateExchanges, adminApproveUserUid, adminRejectUserUid, dispatch } = useContext(AppContext);
     const { allUsers } = state;
     const [allWithdrawals, setAllWithdrawals] = useState<AggregatedWithdrawal[]>([]);
     const [groupBy, setGroupBy] = useState<'user' | 'recipient'>('user');
     const [searchQuery, setSearchQuery] = useState('');
+    const [selectedExchangeTab, setSelectedExchangeTab] = useState<string>('all');
     
     // Config State
     const [settings, setSettings] = useState<Record<Token, WithdrawalSetting>>(state.withdrawalSettings);
     const [showSettings, setShowSettings] = useState(false);
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+    // Dynamic Exchanges State
+    const [exchanges, setExchanges] = useState<{ name: string; enabled: boolean }[]>(state.exchanges || []);
+    const [newExchangeName, setNewExchangeName] = useState('');
+    const [exchangesSaveStatus, setExchangesSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+    useEffect(() => {
+        setExchanges(state.exchanges || []);
+    }, [state.exchanges]);
+
+    const handleExchangeToggle = (index: number) => {
+        const updated = [...exchanges];
+        updated[index] = { ...updated[index], enabled: !updated[index].enabled };
+        setExchanges(updated);
+    };
+
+    const handleAddExchange = () => {
+        if (!newExchangeName.trim()) return;
+        const name = newExchangeName.trim();
+        if (exchanges.some(e => e.name.toLowerCase() === name.toLowerCase())) {
+            alert("Exchange already exists.");
+            return;
+        }
+        setExchanges([...exchanges, { name, enabled: true }]);
+        setNewExchangeName('');
+    };
+
+    const handleRemoveExchange = (index: number) => {
+        const updated = exchanges.filter((_, i) => i !== index);
+        setExchanges(updated);
+    };
+
+    const handleSaveExchanges = async () => {
+        setExchangesSaveStatus('saving');
+        try {
+            await adminUpdateExchanges(exchanges);
+            setExchangesSaveStatus('saved');
+            setTimeout(() => setExchangesSaveStatus('idle'), 2000);
+        } catch (e) {
+            console.error(e);
+            setExchangesSaveStatus('idle');
+        }
+    };
 
     useEffect(() => {
         setSettings(state.withdrawalSettings);
@@ -117,30 +160,86 @@ const WithdrawalManager: React.FC = () => {
         }));
     };
 
-    const handleImageUpload = (e: ChangeEvent<HTMLInputElement>, token: Token) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            const objectUrl = URL.createObjectURL(file);
-            handleSettingChange(token, 'depositQrCodeUrl', objectUrl);
-        }
-    };
-
     const handleSaveSettings = () => {
         setSaveStatus('saving');
-        adminUpdateWithdrawalSettings(settings);
+        
+        // Sanitize any empty strings or NaNs back to proper numbers
+        const sanitizedSettings = { ...settings };
+        Object.keys(sanitizedSettings).forEach(tokenKey => {
+            const token = tokenKey as Token;
+            const s = sanitizedSettings[token];
+            if (s) {
+                // Explicitly delete/omit QR Code URL as only address should be configured
+                const { depositQrCodeUrl, ...rest } = s as any;
+                sanitizedSettings[token] = {
+                    ...rest,
+                    minAmount: typeof s.minAmount === 'number' && !isNaN(s.minAmount) ? s.minAmount : 0,
+                    dailyLimit: typeof s.dailyLimit === 'number' && !isNaN(s.dailyLimit) ? s.dailyLimit : 0,
+                    dailyCountLimit: typeof s.dailyCountLimit === 'number' && !isNaN(s.dailyCountLimit) ? s.dailyCountLimit : 3,
+                    swapRate: typeof s.swapRate === 'number' && !isNaN(s.swapRate) ? s.swapRate : 0,
+                    swapFee: typeof s.swapFee === 'number' && !isNaN(s.swapFee) ? s.swapFee : 0,
+                } as any;
+            }
+        });
+
+        adminUpdateWithdrawalSettings(sanitizedSettings);
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 2000);
     };
 
+    // Calculate exchange counts for withdrawal tabs
+    const exchangeCounts = useMemo(() => {
+        const counts: Record<string, number> = {
+            all: allWithdrawals.length,
+            none: 0
+        };
+        allWithdrawals.forEach(w => {
+            if (w.exchange) {
+                const exch = w.exchange;
+                counts[exch] = (counts[exch] || 0) + 1;
+            } else {
+                counts.none = counts.none + 1;
+            }
+        });
+        return counts;
+    }, [allWithdrawals]);
+
+    // Gather unique exchanges from both existing withdrawal records and the defined/enabled exchanges list
+    const uniqueExchanges = useMemo(() => {
+        const set = new Set<string>();
+        // Add dynamic exchanges configured in state
+        (state.exchanges || []).forEach(e => {
+            set.add(e.name);
+        });
+        // Add any other exchanges found in all withdrawals
+        allWithdrawals.forEach(w => {
+            if (w.exchange) {
+                set.add(w.exchange);
+            }
+        });
+        return Array.from(set).sort();
+    }, [state.exchanges, allWithdrawals]);
+
     const filteredWithdrawals = useMemo(() => {
-        if (!searchQuery.trim()) return allWithdrawals;
+        let list = allWithdrawals;
+
+        // Apply exchange filter
+        if (selectedExchangeTab !== 'all') {
+            if (selectedExchangeTab === 'none') {
+                list = list.filter(w => !w.exchange);
+            } else {
+                list = list.filter(w => w.exchange === selectedExchangeTab);
+            }
+        }
+
+        if (!searchQuery.trim()) return list;
         const lowerQuery = searchQuery.toLowerCase();
-        return allWithdrawals.filter(w => 
+        return list.filter(w => 
             w.userEmail.toLowerCase().includes(lowerQuery) ||
             w.recipientAddress.toLowerCase().includes(lowerQuery) ||
             w.id.toLowerCase().includes(lowerQuery)
         );
-    }, [allWithdrawals, searchQuery]);
+    }, [allWithdrawals, selectedExchangeTab, searchQuery]);
 
     const groupedByUser = useMemo(() => {
         return filteredWithdrawals.reduce<Record<string, AggregatedWithdrawal[]>>((acc, w) => {
@@ -161,6 +260,10 @@ const WithdrawalManager: React.FC = () => {
             return acc;
         }, {});
     }, [filteredWithdrawals]);
+
+    const pendingUidApprovals = useMemo(() => {
+        return allUsers.filter(user => user.gameUid && !user.isUidVerified);
+    }, [allUsers]);
 
     const renderByUser = () => {
         const users = Object.keys(groupedByUser);
@@ -258,6 +361,104 @@ const WithdrawalManager: React.FC = () => {
                 </button>
             </div>
 
+            {/* Pending UID Approvals Section */}
+            {pendingUidApprovals.length > 0 && (
+                <div className="mb-6 bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 animate-fade-in">
+                    <h3 className="text-base font-bold text-yellow-500 mb-3 flex items-center space-x-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span>
+                        <span>Pending UID Verifications ({pendingUidApprovals.length})</span>
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {pendingUidApprovals.map(user => (
+                            <div key={user.email} className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+                                <div className="space-y-2">
+                                    <div className="flex items-center space-x-2">
+                                        {user.photoURL ? (
+                                            <img src={user.photoURL} alt="Avatar" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                                        ) : (
+                                            <div className="w-6 h-6 rounded-full bg-yellow-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                                                {(user.displayName || user.email).charAt(0).toUpperCase()}
+                                            </div>
+                                        )}
+                                        <span className="font-semibold text-gray-900 dark:text-white text-sm truncate max-w-[200px]">
+                                            {user.displayName || user.email}
+                                        </span>
+                                    </div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                                        <p>Email: <span className="font-mono text-gray-750 dark:text-gray-300">{user.email}</span></p>
+                                        <p className="mt-1">
+                                            Requested UID: <span className="font-bold font-mono text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">{user.gameUid}</span>
+                                            {user.pendingExchange && (
+                                                <span className="ml-2 font-bold text-orange-600 dark:text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded">Exchange: {user.pendingExchange}</span>
+                                            )}
+                                        </p>
+                                    </div>
+                                    
+                                    {(() => {
+                                        const currentScreenshot = user.pendingExchange && user.exchangeScreenshotUrls?.[user.pendingExchange]
+                                            ? user.exchangeScreenshotUrls[user.pendingExchange]
+                                            : user.uidScreenshotUrl;
+
+                                        if (!currentScreenshot) return null;
+
+                                        // Check if this screenshot URL is reused for other exchanges on this user
+                                        const isReusedLocally = Object.values(user.exchangeScreenshotUrls || {}).filter(url => url === currentScreenshot).length > 1;
+                                        // Check if any other user has the exact same screenshot url or within their exchangeScreenshotUrls
+                                        const otherUsersWithSameScreenshot = allUsers.filter(u => u.email !== user.email && (
+                                            u.uidScreenshotUrl === currentScreenshot || 
+                                            Object.values(u.exchangeScreenshotUrls || {}).includes(currentScreenshot)
+                                        ));
+                                        const isReusedGlobally = otherUsersWithSameScreenshot.length > 0;
+
+                                        return (
+                                            <div className="mt-2">
+                                                <div className="flex flex-col gap-1 mb-1.5">
+                                                    <p className="text-xs font-medium text-gray-400">UID Screenshot:</p>
+                                                    {isReusedLocally && (
+                                                        <span className="inline-block self-start text-[10px] text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded font-semibold border border-yellow-500/20">
+                                                            ⚠️ Same image reused on multiple exchanges
+                                                        </span>
+                                                    )}
+                                                    {isReusedGlobally && (
+                                                        <span className="inline-block self-start text-[10px] text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded font-semibold border border-red-500/20">
+                                                            🚫 Matches other user: {otherUsersWithSameScreenshot[0].email}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div 
+                                                    onClick={() => dispatch({ type: 'SHOW_IMAGE_PREVIEW', payload: currentScreenshot })}
+                                                    className="relative group overflow-hidden rounded border border-gray-200 dark:border-gray-700 cursor-pointer h-20 w-36 bg-gray-100 dark:bg-gray-900 flex items-center justify-center hover:opacity-90 transition-all"
+                                                >
+                                                    <img src={currentScreenshot} alt="UID Proof" className="max-h-full max-w-full object-contain" referrerPolicy="no-referrer" />
+                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] text-white font-bold transition-opacity">
+                                                        Click to Zoom
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                                
+                                <div className="mt-4 flex gap-2">
+                                    <button
+                                        onClick={() => adminRejectUserUid(user.email, user.pendingExchange)}
+                                        className="flex-1 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded transition-colors"
+                                    >
+                                        Reject UID
+                                    </button>
+                                    <button
+                                        onClick={() => adminApproveUserUid(user.email, user.gameUid || '', user.pendingExchange)}
+                                        className="flex-1 py-1.5 bg-green-600 hover:bg-green-700 text-white font-bold text-xs rounded transition-colors"
+                                    >
+                                        Approve UID
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {showSettings && (
                 <div className="mb-6 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 border border-gray-300 dark:border-gray-700 animate-fade-in">
                     <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3">Withdrawal & Swap Configuration</h3>
@@ -287,8 +488,11 @@ const WithdrawalManager: React.FC = () => {
                                         <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Min Amount</label>
                                         <input 
                                             type="number" 
-                                            value={settings[token]?.minAmount ?? ''} 
-                                            onChange={(e) => handleSettingChange(token, 'minAmount', parseInt(e.target.value))}
+                                            value={settings[token]?.minAmount === '' || (typeof settings[token]?.minAmount === 'number' && isNaN(settings[token]?.minAmount)) ? '' : (settings[token]?.minAmount ?? '')} 
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                handleSettingChange(token, 'minAmount', val === '' ? '' : parseInt(val));
+                                            }}
                                             className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm p-2 rounded border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-purple-500 focus:outline-none"
                                         />
                                     </div>
@@ -296,8 +500,11 @@ const WithdrawalManager: React.FC = () => {
                                         <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Daily Limit (Amount)</label>
                                         <input 
                                             type="number" 
-                                            value={settings[token]?.dailyLimit ?? ''} 
-                                            onChange={(e) => handleSettingChange(token, 'dailyLimit', parseInt(e.target.value))}
+                                            value={settings[token]?.dailyLimit === '' || (typeof settings[token]?.dailyLimit === 'number' && isNaN(settings[token]?.dailyLimit)) ? '' : (settings[token]?.dailyLimit ?? '')} 
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                handleSettingChange(token, 'dailyLimit', val === '' ? '' : parseInt(val));
+                                            }}
                                             className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm p-2 rounded border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-purple-500 focus:outline-none"
                                         />
                                     </div>
@@ -305,8 +512,11 @@ const WithdrawalManager: React.FC = () => {
                                         <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Daily Count Limit</label>
                                         <input 
                                             type="number" 
-                                            value={settings[token]?.dailyCountLimit ?? 3} 
-                                            onChange={(e) => handleSettingChange(token, 'dailyCountLimit', parseInt(e.target.value))}
+                                            value={settings[token]?.dailyCountLimit === '' || (typeof settings[token]?.dailyCountLimit === 'number' && isNaN(settings[token]?.dailyCountLimit)) ? '' : (settings[token]?.dailyCountLimit ?? 3)} 
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                handleSettingChange(token, 'dailyCountLimit', val === '' ? '' : parseInt(val));
+                                            }}
                                             className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm p-2 rounded border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-purple-500 focus:outline-none"
                                         />
                                     </div>
@@ -315,8 +525,11 @@ const WithdrawalManager: React.FC = () => {
                                         <input 
                                             type="number" 
                                             step="0.000001"
-                                            value={settings[token]?.swapRate ?? 1} 
-                                            onChange={(e) => handleSettingChange(token, 'swapRate', parseFloat(e.target.value))}
+                                            value={settings[token]?.swapRate === '' || (typeof settings[token]?.swapRate === 'number' && isNaN(settings[token]?.swapRate)) ? '' : (settings[token]?.swapRate ?? 0)} 
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                handleSettingChange(token, 'swapRate', val === '' ? '' : parseFloat(val));
+                                            }}
                                             className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm p-2 rounded border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-green-500 focus:outline-none"
                                         />
                                     </div>
@@ -325,8 +538,11 @@ const WithdrawalManager: React.FC = () => {
                                         <input 
                                             type="number" 
                                             step="0.1"
-                                            value={settings[token]?.swapFee ?? 0} 
-                                            onChange={(e) => handleSettingChange(token, 'swapFee', parseFloat(e.target.value))}
+                                            value={settings[token]?.swapFee === '' || (typeof settings[token]?.swapFee === 'number' && isNaN(settings[token]?.swapFee)) ? '' : (settings[token]?.swapFee ?? 0)} 
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                handleSettingChange(token, 'swapFee', val === '' ? '' : parseFloat(val));
+                                            }}
                                             className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm p-2 rounded border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-red-500 focus:outline-none"
                                         />
                                     </div>
@@ -387,33 +603,76 @@ const WithdrawalManager: React.FC = () => {
                                                 placeholder="0x..."
                                             />
                                         </div>
-                                        <div className="md:col-span-2">
-                                             <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">QR Code Image URL</label>
-                                             <div className="flex gap-2">
-                                                <input 
-                                                    type="text" 
-                                                    value={settings[token]?.depositQrCodeUrl || ''} 
-                                                    onChange={(e) => handleSettingChange(token, 'depositQrCodeUrl', e.target.value)}
-                                                    className="flex-grow bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm p-2 rounded border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-purple-500 focus:outline-none"
-                                                    placeholder="https://..."
-                                                />
-                                                <label className="cursor-pointer bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white p-2 rounded border border-gray-300 dark:border-gray-600 flex items-center justify-center min-w-[40px] transition-colors" title="Upload QR Image">
-                                                    <UploadIcon className="w-4 h-4 text-purple-400" />
-                                                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, token)} />
-                                                </label>
-                                             </div>
-                                             {settings[token]?.depositQrCodeUrl && (
-                                                 <div className="mt-2">
-                                                     <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-1">Preview:</p>
-                                                     <img src={settings[token]?.depositQrCodeUrl} alt="QR Preview" className="h-24 w-24 object-contain bg-white rounded p-1" />
-                                                 </div>
-                                             )}
-                                        </div>
                                     </div>
                                 </div>
                             </div>
                         ))}
                     </div>
+
+                    <hr className="my-6 border-gray-200 dark:border-gray-700" />
+                    
+                    <div className="bg-white dark:bg-gray-750 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <h4 className="font-bold text-gray-900 dark:text-white mb-2 flex items-center space-x-2">
+                            <span>Supported Exchanges</span>
+                        </h4>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Add, remove, or toggle exchanges dynamically for withdrawal destinations.</p>
+                        
+                        <div className="flex gap-2 mb-4">
+                            <input
+                                type="text"
+                                placeholder="Add Exchange (e.g. KuCoin)"
+                                value={newExchangeName}
+                                onChange={e => setNewExchangeName(e.target.value)}
+                                className="flex-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm p-2 rounded border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                            />
+                            <button
+                                onClick={handleAddExchange}
+                                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded transition-colors"
+                            >
+                                Add
+                            </button>
+                        </div>
+
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            {exchanges.map((exch, idx) => (
+                                <div key={exch.name} className="flex justify-between items-center bg-gray-50 dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700 text-sm">
+                                    <span className="font-medium text-gray-900 dark:text-white">{exch.name}</span>
+                                    <div className="flex items-center space-x-3">
+                                        <label className="inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={exch.enabled}
+                                                onChange={() => handleExchangeToggle(idx)}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="relative w-9 h-5 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                                            <span className="ml-2 text-xs font-medium text-gray-700 dark:text-gray-300">{exch.enabled ? 'Enabled' : 'Disabled'}</span>
+                                        </label>
+                                        <button
+                                            onClick={() => handleRemoveExchange(idx)}
+                                            className="text-red-500 hover:text-red-700 p-1"
+                                            title="Remove Exchange"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="mt-4 flex justify-end">
+                            <button
+                                onClick={handleSaveExchanges}
+                                disabled={exchangesSaveStatus === 'saving'}
+                                className={`px-4 py-1.5 rounded text-xs font-bold transition-colors ${exchangesSaveStatus === 'saved' ? 'bg-green-600 text-white' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}
+                            >
+                                {exchangesSaveStatus === 'saving' ? 'Saving...' : exchangesSaveStatus === 'saved' ? 'Exchanges Saved!' : 'Save Exchange List'}
+                            </button>
+                        </div>
+                    </div>
+
                     <div className="mt-4 flex justify-end">
                         <button 
                             onClick={handleSaveSettings} 
@@ -425,6 +684,64 @@ const WithdrawalManager: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* Exchange Tabs Selector */}
+            <div className="mb-6">
+                <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 dark:border-gray-800 pb-4">
+                    <button
+                        onClick={() => setSelectedExchangeTab('all')}
+                        className={`px-4 py-2 text-xs font-bold rounded-lg transition-all border ${
+                            selectedExchangeTab === 'all'
+                                ? 'bg-purple-600 border-purple-600 text-white shadow-sm shadow-purple-600/10'
+                                : 'bg-white dark:bg-[#161B22] border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                        }`}
+                    >
+                        All Exchanges ({allWithdrawals.length})
+                    </button>
+                    {uniqueExchanges.map(exchange => {
+                        const count = exchangeCounts[exchange] || 0;
+                        return (
+                            <button
+                                key={exchange}
+                                onClick={() => setSelectedExchangeTab(exchange)}
+                                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all border flex items-center gap-1.5 ${
+                                    selectedExchangeTab === exchange
+                                        ? 'bg-purple-600 border-purple-600 text-white shadow-sm shadow-purple-600/10'
+                                        : 'bg-white dark:bg-[#161B22] border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                                }`}
+                            >
+                                <span>{exchange}</span>
+                                <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
+                                    selectedExchangeTab === exchange
+                                        ? 'bg-white/20 text-white'
+                                        : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold'
+                                }`}>
+                                    {count}
+                                </span>
+                            </button>
+                        );
+                    })}
+                    {exchangeCounts.none > 0 && (
+                        <button
+                            onClick={() => setSelectedExchangeTab('none')}
+                            className={`px-4 py-2 text-xs font-bold rounded-lg transition-all border flex items-center gap-1.5 ${
+                                selectedExchangeTab === 'none'
+                                    ? 'bg-purple-600 border-purple-600 text-white shadow-sm shadow-purple-600/10'
+                                    : 'bg-white dark:bg-[#161B22] border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                            }`}
+                        >
+                            <span>No Exchange / Direct</span>
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
+                                selectedExchangeTab === 'none'
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold'
+                            }`}>
+                                {exchangeCounts.none}
+                            </span>
+                        </button>
+                    )}
+                </div>
+            </div>
 
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
                 <div className="flex border border-gray-300 dark:border-gray-700 rounded-lg p-1 max-w-xs bg-gray-100 dark:bg-gray-800 w-full md:w-auto">

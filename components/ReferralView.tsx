@@ -327,22 +327,31 @@ const ReferralView: React.FC = () => {
                         </div>
                     ) : referralList.length > 0 ? (
                         <div className="space-y-3">
-                            {referralList.map((user, idx) => (
-                                <motion.div 
-                                    key={idx}
-                                    initial={{ opacity: 0, x: -10 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ delay: idx * 0.05 }}
-                                    className="flex items-center justify-between bg-gray-50 dark:bg-gray-900/50 p-4 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-indigo-200 dark:hover:border-indigo-900/50 transition-colors"
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900/30 dark:to-purple-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-sm shadow-inner">
-                                            {user.email.charAt(0).toUpperCase()}
-                                        </div>
-                                        <div>
-                                            <p className="font-semibold text-gray-900 dark:text-white text-sm">
-                                                {maskEmail(user.email)}
-                                            </p>
+                            {referralList.map((user, idx) => {
+                                const isTgReferral = user.email?.endsWith('@tg.onlymemesearn.com') || user.email?.endsWith('@tg.onlymemesearn.store');
+                                const displayUserText = isTgReferral 
+                                    ? (user.displayName || 'Telegram User') 
+                                    : maskEmail(user.email);
+                                const initialChar = (user.displayName || user.email || 'U')
+                                    .replace('@', '')
+                                    .charAt(0)
+                                    .toUpperCase();
+                                return (
+                                    <motion.div 
+                                        key={idx}
+                                        initial={{ opacity: 0, x: -10 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: idx * 0.05 }}
+                                        className="flex items-center justify-between bg-gray-50 dark:bg-gray-900/50 p-4 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-indigo-200 dark:hover:border-indigo-900/50 transition-colors"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900/30 dark:to-purple-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-sm shadow-inner">
+                                                {initialChar}
+                                            </div>
+                                            <div>
+                                                <p className="font-semibold text-gray-900 dark:text-white text-sm">
+                                                    {displayUserText}
+                                                </p>
                                             <div className="flex items-center gap-2 mt-0.5">
                                                 {isUserOnline(user.lastActive) ? (
                                                     <span className="text-[10px] text-green-600 dark:text-green-400 flex items-center font-medium bg-green-100 dark:bg-green-900/20 px-1.5 py-0.5 rounded-full">
@@ -368,7 +377,7 @@ const ReferralView: React.FC = () => {
                                         <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium mt-0.5">Total Score</p>
                                     </div>
                                 </motion.div>
-                            ))}
+                            ); })}
                         </div>
                     ) : (
                         <div className="text-center py-12 bg-gray-50 dark:bg-gray-900/30 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">

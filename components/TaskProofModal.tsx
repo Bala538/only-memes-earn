@@ -1,5 +1,5 @@
 
-import React, { useState, useContext, useEffect, useMemo } from 'react';
+import React, { useState, useContext, useEffect, useMemo, useCallback } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Video } from '../types';
 import TokenIcon from './icons/TokenIcon';
@@ -7,6 +7,8 @@ import UploadIcon from './icons/UploadIcon';
 import CheckCircleIcon from './icons/CheckCircleIcon';
 import ClockIcon from './icons/ClockIcon';
 import RewardClaimedModal from './RewardClaimedModal';
+import { openSafeLink } from '../utils/urlUtils';
+import { triggerHapticFeedback } from '../utils/telegramUtils';
 
 interface TaskProofModalProps {
     task: Video;
@@ -18,7 +20,7 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
         state,
         startTask,
         cancelTask,
-        submitYouTubeProof, submitTelegramProof, 
+        submitYouTubeProof, 
         submitFacebookProof, submitInstagramProof, submitTwitterProof, 
         submitTikTokProof, submitAppDownloadProof, submitOtherProof,
         submitVideoProof,
@@ -70,7 +72,7 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
     const [canClaim, setCanClaim] = useState(false);
 
     // Function to calculate time remaining
-    const calculateTimeLeft = () => {
+    const calculateTimeLeft = useCallback(() => {
         if (existingProof?.startedAt) {
             const startTime = new Date(existingProof.startedAt).getTime();
             const now = Date.now();
@@ -79,9 +81,9 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
             return remaining;
         }
         return requiredSeconds;
-    };
+    }, [existingProof?.startedAt, requiredSeconds]);
 
-    // Initial state check
+    // Initial state check and render-time clamp
     useEffect(() => {
         if (isStarted && existingProof?.startedAt) {
             const remaining = calculateTimeLeft();
@@ -90,6 +92,10 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
         } else if (isApproved || isClaimed) {
             setTimeLeft(0);
             setCanClaim(true);
+        } else if (!isStarted) {
+             // Reset for fresh start
+             setTimeLeft(requiredSeconds);
+             setCanClaim(requiredSeconds <= 0);
         }
     }, [existingProof, isStarted, isApproved, isClaimed, requiredSeconds, calculateTimeLeft]);
 
@@ -118,6 +124,7 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
                 setTimeLeft(remaining);
                 if (remaining <= 0) {
                     setCanClaim(true);
+                    triggerHapticFeedback('success'); // timer complete haptic
                     clearInterval(timer);
                 }
             } else {
@@ -125,6 +132,7 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
                 setTimeLeft(prev => {
                     if (prev <= 1) {
                         setCanClaim(true);
+                        triggerHapticFeedback('success'); // timer complete haptic
                         return 0;
                     }
                     return prev - 1;
@@ -134,8 +142,15 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
         return () => clearInterval(timer);
     }, [isStarted, existingProof, requiredSeconds, timeLeft, isApproved, isClaimed]);
 
+    useEffect(() => {
+        if (uploadError) {
+            triggerHapticFeedback('error');
+        }
+    }, [uploadError]);
+
 
     const handleStart = async () => {
+        triggerHapticFeedback('light');
         setIsSubmitting(true);
         try {
             await startTask(task.id, task.title, task.taskType || 'video');
@@ -143,7 +158,7 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
             // Open Link
             const url = task.url || (task as any).youtubeUrl || (task as any).telegramUrl || (task as any).facebookUrl || (task as any).instagramUrl || (task as any).twitterUrl || (task as any).tiktokUrl || (task as any).downloadUrl;
             if (url) {
-                window.open(url, '_blank', 'noopener,noreferrer');
+                openSafeLink(url);
             }
         } catch (e: any) {
             setUploadError(e.message);
@@ -153,6 +168,7 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
     };
 
     const handleClaimClick = () => {
+        triggerHapticFeedback('light');
         // Validate timer again just in case
         if (isStarted && existingProof?.startedAt) {
              const remaining = calculateTimeLeft();
@@ -190,29 +206,32 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
                 setUploadProgress(100);
             }
 
-            // For Timer tasks, we claim directly.
+            const submitFnMap: any = {
+                'video': submitVideoProof,
+                'youtube': submitYouTubeProof,
+                'facebook': submitFacebookProof,
+                'instagram': submitInstagramProof,
+                'twitter': submitTwitterProof,
+                'tiktok': submitTikTokProof,
+                'app_download': submitAppDownloadProof,
+                'other': submitOtherProof
+            };
+            const submitFn = submitFnMap[task.taskType || 'video'] || submitVideoProof;
+
+            // For Timer tasks, we claim directly after submitting as approved.
             if (isTimerOnly) {
-                await claimTaskReward(task.id, task.taskType || 'video');
+                await submitFn(task.id, task.title, 'timer_completed', reward, task.rewardToken, undefined, 'approved');
+                await claimTaskReward(task.id, task.taskType || 'video', reward, task.rewardToken, task.title);
                 setShowSuccessModal(true);
             } else {
-                // Submit Proof logic for Manual Review or Code
-                const submitFnMap: any = {
-                    'video': submitVideoProof,
-                    'youtube': submitYouTubeProof,
-                    'telegram': submitTelegramProof,
-                    'facebook': submitFacebookProof,
-                    'instagram': submitInstagramProof,
-                    'twitter': submitTwitterProof,
-                    'tiktok': submitTikTokProof,
-                    'app_download': submitAppDownloadProof,
-                    'other': submitOtherProof
-                };
-                const submitFn = submitFnMap[task.taskType || 'video'] || submitVideoProof;
+                const isCodeCorrect = needsCode && task.correctCode && secretCode.trim().toLowerCase() === task.correctCode.trim().toLowerCase();
+                const statusToSubmit = isCodeCorrect ? 'approved' : 'pending';
+
+                await submitFn(task.id, task.title, proofUrl, reward, task.rewardToken, secretCode, statusToSubmit);
                 
-                await submitFn(task.id, task.title, proofUrl, reward, task.rewardToken, secretCode);
-                
-                // If it was a code task and correct, it might be auto-approved/claimed instantly
-                if (needsCode && task.correctCode && secretCode.trim().toLowerCase() === task.correctCode.trim().toLowerCase()) {
+                // If code is correct, we trigger claim directly too
+                if (isCodeCorrect) {
+                     await claimTaskReward(task.id, task.taskType || 'video', reward, task.rewardToken, task.title);
                      setShowSuccessModal(true);
                 } else {
                      onClose();
@@ -234,9 +253,7 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
     };
 
     const handleClose = () => {
-        if (existingProof?.status === 'started') {
-            cancelTask(task.id, task.taskType || 'video');
-        }
+        triggerHapticFeedback('light');
         onClose();
     };
 
@@ -255,7 +272,9 @@ const TaskProofModal: React.FC<TaskProofModalProps> = ({ task, onClose }) => {
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" onClick={(e) => { e.stopPropagation(); setShowConfirmModal(false); }}>
                     <div className="bg-white dark:bg-[#1c1c1e] w-full max-w-sm rounded-2xl p-6 shadow-2xl border border-gray-200 dark:border-gray-700" onClick={e => e.stopPropagation()}>
                         <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Confirm Claim</h3>
-                        <p className="text-gray-500 dark:text-gray-400 mb-6 text-sm">Are you sure you want to submit your proof and claim this reward?</p>
+                        <p className="text-gray-500 dark:text-gray-400 mb-6 text-sm">
+                            {(needsScreenshot || needsCode) ? "Are you sure you want to submit your proof and claim this reward?" : "Are you sure you want to claim this reward?"}
+                        </p>
                         <div className="flex gap-3">
                             <button onClick={() => setShowConfirmModal(false)} className="flex-1 py-3 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white font-bold rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition">Cancel</button>
                             <button onClick={handleClaim} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-500 transition">Confirm</button>

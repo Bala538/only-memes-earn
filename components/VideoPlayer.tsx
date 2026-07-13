@@ -120,14 +120,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video }) => {
         await triggerAd('interstitial');
 
         try {
+            const isAutoApprove = verificationMethod === 'timer' || 
+                (needsCode && video.correctCode && secretCodeInput.trim().toLowerCase() === video.correctCode.trim().toLowerCase());
+            const statusToSubmit = isAutoApprove ? 'approved' : 'pending';
+
             if (video.taskType === 'youtube') {
-                await submitYouTubeProof(video.id, video.title, url, displayReward, video.rewardToken, secretCodeInput);
+                await submitYouTubeProof(video.id, video.title, url, displayReward, video.rewardToken, secretCodeInput, statusToSubmit);
             } else {
-                await submitVideoProof(video.id, video.title, url, displayReward, video.rewardToken, secretCodeInput);
+                await submitVideoProof(video.id, video.title, url, displayReward, video.rewardToken, secretCodeInput, statusToSubmit);
             }
             
             // Check if it was auto-approved immediately (code match or timer)
-            if (needsCode && video.correctCode && secretCodeInput.trim().toLowerCase() === video.correctCode.trim().toLowerCase()) {
+            if (isAutoApprove) {
+                await claimTaskReward(video.id, video.taskType || 'video', displayReward, video.rewardToken, video.title);
                 setShowSuccessModal(true);
             }
         } catch (error: any) {
@@ -160,11 +165,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video }) => {
 
         try {
             const proofData = verificationMethod === 'timer' ? 'timer_completed' : 'code_only';
+            const isAutoApprove = verificationMethod === 'timer' || 
+                (needsCode && video.correctCode && secretCodeInput.trim().toLowerCase() === video.correctCode.trim().toLowerCase());
+            const statusToSubmit = isAutoApprove ? 'approved' : 'pending';
             
             if (video.taskType === 'youtube') {
-                await submitYouTubeProof(video.id, video.title, proofData, displayReward, video.rewardToken, secretCodeInput);
+                await submitYouTubeProof(video.id, video.title, proofData, displayReward, video.rewardToken, secretCodeInput, statusToSubmit);
             } else {
-                await submitVideoProof(video.id, video.title, proofData, displayReward, video.rewardToken, secretCodeInput);
+                await submitVideoProof(video.id, video.title, proofData, displayReward, video.rewardToken, secretCodeInput, statusToSubmit);
+            }
+
+            if (isAutoApprove) {
+                await claimTaskReward(video.id, video.taskType || 'video', displayReward, video.rewardToken, video.title);
             }
             setShowSuccessModal(true);
         } catch (error: any) {
@@ -182,7 +194,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video }) => {
         setShowConfirmModal(null);
         setIsClaiming(true);
         try {
-            await claimTaskReward(video.id, video.taskType || 'video');
+            await claimTaskReward(video.id, video.taskType || 'video', displayReward, video.rewardToken, video.title);
             setShowSuccessModal(true);
         } catch (error: any) {
             setClaimError(error.message || 'Failed to claim reward.');
@@ -197,7 +209,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video }) => {
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" onClick={(e) => { e.stopPropagation(); setShowConfirmModal(null); }}>
                     <div className="bg-white dark:bg-[#1c1c1e] w-full max-w-sm rounded-2xl p-6 shadow-2xl border border-gray-200 dark:border-gray-700" onClick={e => e.stopPropagation()}>
                         <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Confirm Claim</h3>
-                        <p className="text-gray-500 dark:text-gray-400 mb-6 text-sm">Are you sure you want to submit your proof and claim this reward?</p>
+                        <p className="text-gray-500 dark:text-gray-400 mb-6 text-sm">
+                            {showConfirmModal === 'submit' 
+                                ? ((needsScreenshot || needsCode) ? "Are you sure you want to submit your proof and claim this reward?" : "Are you sure you want to claim this reward?") 
+                                : "Are you sure you want to collect your reward?"}
+                        </p>
                         <div className="flex gap-3">
                             <button onClick={() => setShowConfirmModal(null)} className="flex-1 py-3 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white font-bold rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition">Cancel</button>
                             <button onClick={showConfirmModal === 'submit' ? handleSubmit : handleClaimReward} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-500 transition">Confirm</button>

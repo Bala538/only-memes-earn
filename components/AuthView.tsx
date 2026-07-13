@@ -1,28 +1,21 @@
-
 import React, { useContext, useState, useRef, useEffect } from 'react';
 import { AppContext } from '../context/AppContext';
-import GoogleIcon from './icons/GoogleIcon';
-import FacebookIcon from './icons/FacebookIcon';
-import OTPInput from './OTPInput';
 
 const AuthView: React.FC = () => {
-    const { login, register, loginWithGoogle, loginWithFacebook, resetPassword, state } = useContext(AppContext);
+    const { login, register, state } = useContext(AppContext);
     const { authConfig } = state;
     
     // View State: 'welcome' (Get Started screen) or 'auth' (Login/Signup form)
     const [view, setView] = useState<'welcome' | 'auth'>('welcome');
-    const [mode, setMode] = useState<'login' | 'signup' | 'forgot-password'>('login');
+    const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
-    const [showPassword, setShowPassword] = useState(false);
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-    const [otpSent, setOtpSent] = useState(false);
-    const [otp, setOtp] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
+    const [errorObj, setErrorObj] = useState<any>(null);
     const [successMessage, setSuccessMessage] = useState('');
-    const [simulatedOtp, setSimulatedOtp] = useState('');
+    const [agreedToTerms, setAgreedToTerms] = useState(true);
 
     // --- Slider Logic ---
     const sliderRef = useRef<HTMLDivElement>(null);
@@ -47,7 +40,7 @@ const AuthView: React.FC = () => {
             setIsDragging(false);
             setSliderX(maxX);
             if (navigator.vibrate) navigator.vibrate(50);
-            setTimeout(() => setView('auth'), 100);
+            setView('auth');
         }
     };
 
@@ -61,7 +54,7 @@ const AuthView: React.FC = () => {
                  setSliderX(0);
              }
         } else {
-            setSliderX(0);
+             setSliderX(0);
         }
     };
 
@@ -69,193 +62,190 @@ const AuthView: React.FC = () => {
         if (view === 'welcome') setSliderX(0);
     }, [view]);
 
-    // --- Auth Handler ---
-    const handleSendOtp = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!authConfig.enableEmailAuth) return;
-        if (mode === 'login') {
-            // Login flow
-            setError('');
-            setIsLoading(true);
-            try {
-                await login(email, password);
-            } catch (loginErr: any) {
-                if (loginErr.code === 'auth/user-not-found' || loginErr.code === 'auth/invalid-credential' || loginErr.code === 'auth/wrong-password') {
-                    setError('Invalid email or password. Please try again or Sign Up.');
-                } else {
-                    setError(loginErr.message);
-                }
-            } finally {
-                setIsLoading(false);
-            }
-            return;
-        }
-
-        // Signup or Forgot Password flow - send OTP
-        if (mode === 'signup' && password !== confirmPassword) {
-            setError('Passwords do not match');
-            return;
-        }
-
-        setError('');
-        setSuccessMessage('');
-        setIsLoading(true);
-        try {
-            const API_BASE = import.meta.env.VITE_API_URL || '';
-            const res = await fetch(API_BASE + '/api/auth/send-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, mode })
-            });
-            
-            let data;
-            const contentType = res.headers.get("content-type");
-            if (contentType && contentType.indexOf("application/json") !== -1) {
-                data = await res.json();
-            } else {
-                const text = await res.text();
-                console.error("Non-JSON response from /api/auth/send-otp:", text);
-                throw new Error("Server returned an invalid response. Please ensure the backend is running.");
-            }
-
-            if (!res.ok) throw new Error(data.error || 'Failed to send OTP');
-            setOtpSent(true);
-            if (data.isSimulated && data.otp) {
-                setSimulatedOtp(data.otp);
-                setSuccessMessage('Sandbox Mode: Test OTP generated! Find it below.');
-            } else {
-                setSimulatedOtp('');
-                setSuccessMessage('OTP sent to your email!');
-            }
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const handleVerifyOtp = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (mode !== 'signup') return;
-
-        setError('');
-        setIsLoading(true);
-        try {
-            const API_BASE = import.meta.env.VITE_API_URL || '';
-            const res = await fetch(API_BASE + '/api/auth/verify-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, otp })
-            });
-            
-            let data;
-            const contentType = res.headers.get("content-type");
-            if (contentType && contentType.indexOf("application/json") !== -1) {
-                data = await res.json();
-            } else {
-                const text = await res.text();
-                console.error("Non-JSON response from /api/auth/verify-otp:", text);
-                throw new Error("Server returned an invalid response. Please ensure the backend is running.");
-            }
-
-            if (!res.ok) throw new Error(data.error || 'Invalid OTP');
-
-            try {
-                await register(email, password);
-            } catch (regErr: any) {
-                if (regErr.code === 'auth/email-already-in-use') {
-                    throw new Error('Account already exists. Please switch to Login.');
-                }
-                throw regErr;
-            }
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const handleResetPassword = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (mode !== 'forgot-password') return;
-
-        setError('');
-        setIsLoading(true);
-        try {
-            const API_BASE = import.meta.env.VITE_API_URL || '';
-            const res = await fetch(API_BASE + '/api/auth/reset-password', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, otp, newPassword: password })
-            });
-            
-            let data;
-            const contentType = res.headers.get("content-type");
-            if (contentType && contentType.indexOf("application/json") !== -1) {
-                data = await res.json();
-            } else {
-                const text = await res.text();
-                console.error("Non-JSON response from /api/auth/reset-password:", text);
-                throw new Error("Server returned an invalid response. Please ensure the backend is running.");
-            }
-
-            if (!res.ok) throw new Error(data.error || 'Failed to reset password');
-
-            setSuccessMessage('Password reset successfully! You can now login.');
-            setMode('login');
-            setOtpSent(false);
-            setOtp('');
-            setPassword('');
-            setConfirmPassword('');
-            setSimulatedOtp('');
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const handleForgotPasswordClick = () => {
-        setMode('forgot-password');
-        setOtpSent(false);
-        setOtp('');
-        setPassword('');
-        setError('');
-        setSuccessMessage('');
-        setSimulatedOtp('');
-    };
-
     // Use specific image or fallback to main image
     const authImageSource = authConfig.authImageUrl || authConfig.imageUrl;
+    const isIframe = typeof window !== 'undefined' && window.self !== window.top;
 
-    const isEmailDisabled = !authConfig.enableEmailAuth;
-
-    const formatAuthError = (errMessage: string): React.ReactNode => {
+    const formatAuthError = (errMessage: string, errObj?: any): React.ReactNode => {
         if (!errMessage) return null;
-        if (errMessage.includes('auth/operation-not-allowed')) {
+        
+        const rawObj = errObj || errorObj;
+        const code = rawObj?.code || (typeof errMessage === 'string' && errMessage.includes('auth/') 
+            ? errMessage.match(/auth\/[a-zA-Z0-9-]+/)?.[0] 
+            : null);
+            
+        const currentDomain = typeof window !== 'undefined' ? window.location.hostname : 'your preview domain';
+
+        if (code === 'auth/unauthorized-domain' || errMessage.includes('unauthorized-domain')) {
             return (
-                <div className="text-left space-y-1">
-                    <p className="font-extrabold text-red-400 text-center text-xs">Auth Provider Disabled</p>
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal font-medium">
-                        This sign-in method is not enabled in your Firebase Console. Please open your Firebase Console, click Authentication, go to the "Sign-in method" tab, and enable the <strong>Email/Password</strong> and <strong>Google</strong> providers.
+                <div className="text-center space-y-1">
+                    <p className="font-bold text-gray-900 dark:text-white text-xs">
+                        Domain Not Authorized
+                    </p>
+                    <p className="text-[11px] text-gray-600 dark:text-zinc-400 leading-relaxed">
+                        This preview domain ({currentDomain}) is not authorized in Firebase settings. Please register it in your Firebase Console or use the main domain.
                     </p>
                 </div>
             );
         }
-        if (errMessage.includes('auth/popup-blocked')) {
+
+        if (code === 'auth/operation-not-allowed' || errMessage.includes('operation-not-allowed')) {
             return (
-                <div className="text-left space-y-1">
-                    <p className="font-extrabold text-[#FFC107] text-center text-xs">Popup Blocked</p>
-                    <p className="text-[11px] text-gray-400 dark:text-gray-400 leading-normal font-medium">
-                        The Google Sign-In popup was blocked by your browser's ad-blocker or security settings. Please allow popups for this site or open the app in a new tab.
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed">
+                    This login method is currently disabled. Please contact support or use another method.
+                </p>
+            );
+        }
+
+        if (code === 'auth/invalid-api-key' || errMessage.includes('invalid-api-key') || errMessage.includes('API key')) {
+            return (
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed">
+                    A configuration issue occurred. Please check back later or notify the administrator.
+                </p>
+            );
+        }
+
+        if (code === 'auth/iframe-sandbox-restriction' || errMessage.includes('iframe-sandbox-restriction') || errMessage.includes('preview pane')) {
+            return (
+                <div className="text-center space-y-2">
+                    <p className="font-bold text-amber-600 dark:text-amber-400 text-xs">
+                        Action Required
                     </p>
+                    <p className="text-[11px] text-gray-600 dark:text-zinc-400 leading-relaxed">
+                        To sign in securely, please open the application in a new browser tab.
+                    </p>
+                    <div className="pt-1">
+                        <a 
+                            href={typeof window !== 'undefined' ? window.location.href : '#'} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="inline-block px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-xs transition-all active:scale-95 shadow-sm"
+                        >
+                            Open in New Tab 🚀
+                        </a>
+                    </div>
                 </div>
             );
         }
-        if (errMessage.includes('auth/popup-closed-by-user')) {
-            return 'Sign-In cancelled. The login popup was closed before completing.';
+
+        if (code === 'auth/webview-restriction' || errMessage.includes('webview-restriction') || errMessage.includes('mobile native')) {
+            return (
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed">
+                    Please open onlymemesearn.store in a standard web browser (like Chrome or Safari) to complete sign-in.
+                </p>
+            );
         }
-        return errMessage;
+
+        if (code === 'auth/popup-blocked' || errMessage.includes('popup-blocked')) {
+            return (
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed font-medium">
+                    The sign-in popup was blocked by your browser. Please allow popups or open the app in a new tab.
+                </p>
+            );
+        }
+
+        if (code === 'auth/popup-closed-by-user' || errMessage.includes('popup-closed-by-user')) {
+            return (
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed">
+                    Sign-in cancelled. Please try again.
+                </p>
+            );
+        }
+
+        if (code === 'auth/network-request-failed' || errMessage.includes('network-request-failed')) {
+            return (
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed font-medium">
+                    Unable to connect to login server. Please check your internet connection and try again.
+                </p>
+            );
+        }
+
+        if (code === 'auth/invalid-credential' || code === 'auth/user-not-found' || code === 'auth/wrong-password' || errMessage.includes('invalid-credential') || errMessage.includes('user-not-found') || errMessage.includes('wrong-password')) {
+            return (
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed font-medium">
+                    Incorrect email or password. Please double check and try again.
+                </p>
+            );
+        }
+
+        if (code === 'auth/email-already-in-use' || errMessage.includes('email-already-in-use')) {
+            return (
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed font-medium">
+                    This email is already registered. Please sign in instead.
+                </p>
+            );
+        }
+
+        if (code === 'auth/weak-password' || errMessage.includes('weak-password')) {
+            return (
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed font-medium">
+                    Please choose a stronger password (at least 6 characters long).
+                </p>
+            );
+        }
+
+        if (code === 'auth/invalid-email' || errMessage.includes('invalid-email')) {
+            return (
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed font-medium">
+                    Please enter a valid email address format.
+                </p>
+            );
+        }
+
+        if (code === 'auth/too-many-requests' || errMessage.includes('too-many-requests')) {
+            return (
+                <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed font-medium">
+                    Too many attempts. Access temporarily disabled. Please try again in a few minutes.
+                </p>
+            );
+        }
+
+        return (
+            <p className="text-[11px] text-gray-600 dark:text-zinc-400 text-center leading-relaxed">
+                {errMessage.replace(/^Firebase:\s*/i, '')}
+            </p>
+        );
+    };
+
+    const handleAuthSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setErrorObj(null);
+        setSuccessMessage('');
+
+        if (!email.trim() || !password.trim()) {
+            setError("Please fill in all fields.");
+            return;
+        }
+
+        if (!agreedToTerms) {
+            setError("You must agree to the Terms and Conditions to continue.");
+            return;
+        }
+
+        if (authMode === 'signup' && password !== confirmPassword) {
+            setError("Passwords do not match.");
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            if (authMode === 'login') {
+                await login(email.trim(), password);
+            } else {
+                await register(email.trim(), password);
+                setSuccessMessage("Account created successfully! A verification link has been sent to your email address. Please click the link to verify your email, then sign in below.");
+                setAuthMode('login');
+                setPassword('');
+                setConfirmPassword('');
+            }
+        } catch (err: any) {
+            console.error("Auth error:", err);
+            setError(err.message || String(err));
+            setErrorObj(err);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -305,247 +295,131 @@ const AuthView: React.FC = () => {
                             className="w-full h-full object-cover" 
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-white dark:from-[#111] via-transparent to-transparent opacity-90"></div>
+                      </div>
+                 </div>
+
+                 {/* Bottom Form Area */}
+                 <div className="flex-grow bg-white dark:bg-[#111] rounded-t-[2.5rem] shadow-[0_-10px_40px_rgba(0,0,0,0.1)] dark:shadow-[0_-10px_40px_rgba(0,0,0,0.5)] relative z-20 px-8 pt-8 pb-6 flex flex-col justify-between h-full overflow-y-auto -mt-10 border-t border-gray-200 dark:border-white/5 custom-scrollbar">
+                     
+                     <div className="w-full max-w-sm mx-auto space-y-6 my-auto">
+                         <div className="text-center">
+                             <h2 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight uppercase">
+                                 {authMode === 'login' ? 'Welcome Back' : 'Create Account'}
+                             </h2>
+                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 leading-relaxed">
+                                 {authMode === 'login' 
+                                     ? 'Sign in with your email and password to continue earning.' 
+                                     : 'Register with your email to start watching, playing, and earning!'}
+                             </p>
+                         </div>
+
+                         {/* Segmented Control */}
+                         <div className="flex p-1.5 bg-gray-100 dark:bg-zinc-900/80 rounded-2xl w-full">
+                             <button
+                                 type="button"
+                                 onClick={() => { setAuthMode('login'); setError(''); setSuccessMessage(''); }}
+                                 className={`flex-1 py-3 text-xs font-black rounded-xl transition-all cursor-pointer ${authMode === 'login' ? 'bg-white dark:bg-zinc-800 text-gray-950 dark:text-white shadow-md' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}
+                             >
+                                 Sign In
+                             </button>
+                             <button
+                                 type="button"
+                                 onClick={() => { setAuthMode('signup'); setError(''); setSuccessMessage(''); }}
+                                 className={`flex-1 py-3 text-xs font-black rounded-xl transition-all cursor-pointer ${authMode === 'signup' ? 'bg-white dark:bg-zinc-800 text-gray-950 dark:text-white shadow-md' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}
+                             >
+                                 Sign Up
+                             </button>
+                         </div>
+
+                         {successMessage && (
+                              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs text-center font-bold p-4 rounded-2xl shadow-md">
+                                  {successMessage}
+                              </div>
+                          )}
+
+                          {/* Auth Form */}
+                         <form onSubmit={handleAuthSubmit} className="space-y-4">
+                             <div>
+                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Email Address</label>
+                                 <input
+                                     type="email"
+                                     value={email}
+                                     onChange={(e) => setEmail(e.target.value)}
+                                     placeholder="Enter your email"
+                                     required
+                                     className="w-full px-4 py-3.5 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white rounded-xl border border-gray-200 dark:border-zinc-800 focus:outline-none focus:ring-2 focus:ring-amber-400 font-medium text-sm transition-all"
+                                 />
+                             </div>
+
+                             <div>
+                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Password</label>
+                                 <input
+                                     type="password"
+                                     value={password}
+                                     onChange={(e) => setPassword(e.target.value)}
+                                     placeholder="Enter your password"
+                                     required
+                                     className="w-full px-4 py-3.5 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white rounded-xl border border-gray-200 dark:border-zinc-800 focus:outline-none focus:ring-2 focus:ring-amber-400 font-medium text-sm transition-all"
+                                 />
+                             </div>
+
+                             {authMode === 'signup' && (
+                                 <div className="animate-fadeIn">
+                                     <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Confirm Password</label>
+                                     <input
+                                         type="password"
+                                         value={confirmPassword}
+                                         onChange={(e) => setConfirmPassword(e.target.value)}
+                                         placeholder="Confirm your password"
+                                         required={authMode === 'signup'}
+                                         className="w-full px-4 py-3.5 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white rounded-xl border border-gray-200 dark:border-zinc-800 focus:outline-none focus:ring-2 focus:ring-amber-400 font-medium text-sm transition-all"
+                                     />
+                                 </div>
+                             )}
+
+                             <div className="pt-2">
+                                 <button
+                                     type="submit"
+                                     disabled={isLoading}
+                                     className="w-full flex items-center justify-center gap-3 py-4 px-6 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 active:scale-95 disabled:opacity-50 text-black font-extrabold text-base rounded-2xl shadow-xl shadow-amber-500/10 transition-all duration-300 cursor-pointer"
+                                 >
+                                     {isLoading ? (
+                                         <div className="inline-block animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-black"></div>
+                                     ) : (
+                                         <span>{authMode === 'login' ? 'Sign In 🚀' : 'Create Account ✨'}</span>
+                                     )}
+                                 </button>
+                             </div>
+                         </form>
+
+                         {error && (
+                             <div className="text-xs text-center bg-zinc-50 dark:bg-zinc-900/60 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800/40 animate-fadeIn text-gray-700 dark:text-zinc-300">
+                                 {formatAuthError(error)}
+                             </div>
+                         )}
                      </div>
-                </div>
 
-                {/* Bottom Form Area */}
-                <div className="flex-grow bg-white dark:bg-[#111] rounded-t-[2.5rem] shadow-[0_-10px_40px_rgba(0,0,0,0.1)] dark:shadow-[0_-10px_40px_rgba(0,0,0,0.5)] relative z-20 px-8 pt-8 pb-4 flex flex-col h-full overflow-hidden -mt-10 border-t border-gray-200 dark:border-white/5">
-                    
-                    <div className="flex justify-center mb-6 space-x-4">
-                        {mode === 'forgot-password' ? (
-                            <h2 className="text-xl font-black text-gray-900 dark:text-white border-b-2 border-[#FFC107]">
-                                Reset Password
-                            </h2>
-                        ) : (
-                            <>
-                                <button 
-                                    onClick={() => { setMode('login'); setError(''); setSuccessMessage(''); setOtpSent(false); setOtp(''); setPassword(''); setConfirmPassword(''); setSimulatedOtp(''); }}
-                                    className={`text-xl font-black transition-colors ${mode === 'login' ? 'text-gray-900 dark:text-white border-b-2 border-[#FFC107]' : 'text-gray-400'}`}
-                                >
-                                    Login
-                                </button>
-                                <button 
-                                    onClick={() => { setMode('signup'); setError(''); setSuccessMessage(''); setOtpSent(false); setOtp(''); setPassword(''); setConfirmPassword(''); setSimulatedOtp(''); }}
-                                    className={`text-xl font-black transition-colors ${mode === 'signup' ? 'text-gray-900 dark:text-white border-b-2 border-[#FFC107]' : 'text-gray-400'}`}
-                                >
-                                    Sign Up
-                                </button>
-                            </>
-                        )}
-                    </div>
+                      <div className="text-center pt-6 border-t border-gray-100 dark:border-white/5 mt-6 flex justify-center">
+                          <button
+                              type="button"
+                              onClick={() => setAgreedToTerms(!agreedToTerms)}
+                              className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-gray-50 dark:hover:bg-zinc-900 transition-all duration-200"
+                          >
+                              <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
+                                  agreedToTerms 
+                                      ? 'bg-[#FFC107] border-[#FFC107] text-black shadow-sm shadow-[#FFC107]/20' 
+                                      : 'border-gray-300 dark:border-zinc-700 text-transparent'
+                              }`}>
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-3.5 h-3.5">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                  </svg>
+                              </div>
+                              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                                  I agree to the Terms and Conditions
+                              </span>
+                          </button>
+                      </div>
 
-                    {successMessage && <div className="mb-4 p-3 bg-green-500/20 border border-green-500/50 rounded-xl text-green-400 text-xs text-center font-bold shrink-0">{successMessage}</div>}
-
-                    {simulatedOtp && otpSent && (
-                        <div className="mb-4 p-3.5 bg-yellow-950/20 border border-[#FFC107]/25 rounded-xl text-center shrink-0">
-                            <span className="text-[10px] font-black uppercase text-[#FFC107] tracking-wider bg-[#FFC107]/15 px-2 py-0.5 rounded font-mono">Sandbox Test Code</span>
-                            <p className="text-gray-400 text-xs font-semibold mt-1">
-                                Developer sandbox email mode active. Please authenticate using research test code:
-                            </p>
-                            <p className="text-2xl font-black text-[#FFC107] font-mono tracking-widest mt-1">
-                                {simulatedOtp}
-                            </p>
-                        </div>
-                    )}
-
-                    {/* Form */}
-                    <div className="overflow-y-auto flex-grow -mr-4 pr-4 custom-scrollbar">
-                        {isEmailDisabled && (
-                            <div className="mb-4 p-3 bg-gray-800/50 border border-gray-700/50 rounded-xl flex items-center justify-center space-x-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-400">
-                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
-                                </svg>
-                                <span className="text-xs font-bold text-gray-400 uppercase">
-                                    Email login disabled
-                                </span>
-                            </div>
-                        )}
-
-                        <form onSubmit={(mode === 'signup' && otpSent) ? handleVerifyOtp : (mode === 'forgot-password' && otpSent) ? handleResetPassword : handleSendOtp} className={`space-y-4 pb-4 transition-opacity duration-300 ${isEmailDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-400 mb-1.5 pl-1">Email</label>
-                                <div className="relative group">
-                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-gray-500 group-focus-within:text-[#FFC107] transition-colors"><path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" /><path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" /></svg></div>
-                                    <input 
-                                        type="email" 
-                                        required 
-                                        disabled={isLoading || isEmailDisabled || ((mode === 'signup' || mode === 'forgot-password') && otpSent)}
-                                        value={email} 
-                                        onChange={(e) => setEmail(e.target.value)} 
-                                        className="w-full bg-gray-50 dark:bg-[#222] text-gray-900 dark:text-white pl-12 pr-4 py-3.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-[#FFC107] focus:ring-1 focus:ring-[#FFC107] outline-none transition-all placeholder-gray-400 dark:placeholder-gray-600 font-medium text-sm disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-gray-800" 
-                                        placeholder="name@example.com" 
-                                    />
-                                </div>
-                            </div>
-
-                            {!(mode === 'forgot-password' && !otpSent) && (
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-400 mb-1.5 pl-1">
-                                        {mode === 'forgot-password' ? 'New Password' : 'Password'}
-                                    </label>
-                                    <div className="relative group">
-                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-gray-500 group-focus-within:text-[#FFC107] transition-colors"><path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" /></svg></div>
-                                        <input 
-                                            type={showPassword ? "text" : "password"} 
-                                            required 
-                                            disabled={isLoading || isEmailDisabled || (mode === 'signup' && otpSent)}
-                                            value={password} 
-                                            onChange={(e) => setPassword(e.target.value)} 
-                                            className="w-full bg-gray-50 dark:bg-[#222] text-gray-900 dark:text-white pl-12 pr-12 py-3.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-[#FFC107] focus:ring-1 focus:ring-[#FFC107] outline-none transition-all placeholder-gray-400 dark:placeholder-gray-600 font-medium text-sm disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-gray-800" 
-                                            placeholder="••••••••" 
-                                            minLength={6}
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowPassword(!showPassword)}
-                                            className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                                            tabIndex={-1}
-                                        >
-                                            {showPassword ? (
-                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                                                </svg>
-                                            ) : (
-                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                </svg>
-                                            )}
-                                        </button>
-                                    </div>
-                                    {mode === 'login' && (
-                                        <div className="flex justify-end mt-2">
-                                            <button 
-                                                type="button" 
-                                                onClick={handleForgotPasswordClick}
-                                                className="text-xs font-bold text-[#FFC107] hover:text-yellow-400 transition-colors"
-                                            >
-                                                Forgot Password?
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {mode === 'signup' && !otpSent && (
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-400 mb-1.5 pl-1">
-                                        Confirm Password
-                                    </label>
-                                    <div className="relative group">
-                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-gray-500 group-focus-within:text-[#FFC107] transition-colors"><path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" /></svg></div>
-                                        <input 
-                                            type={showConfirmPassword ? "text" : "password"} 
-                                            required 
-                                            disabled={isLoading || isEmailDisabled || otpSent}
-                                            value={confirmPassword} 
-                                            onChange={(e) => setConfirmPassword(e.target.value)} 
-                                            className="w-full bg-gray-50 dark:bg-[#222] text-gray-900 dark:text-white pl-12 pr-12 py-3.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-[#FFC107] focus:ring-1 focus:ring-[#FFC107] outline-none transition-all placeholder-gray-400 dark:placeholder-gray-600 font-medium text-sm disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-gray-800" 
-                                            placeholder="••••••••" 
-                                            minLength={6}
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                            className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                                            tabIndex={-1}
-                                        >
-                                            {showConfirmPassword ? (
-                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                                                </svg>
-                                            ) : (
-                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                </svg>
-                                            )}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                            
-                            {((mode === 'signup' || mode === 'forgot-password') && otpSent) && (
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-400 mb-1.5 pl-1">6-Digit Code</label>
-                                    <OTPInput
-                                        value={otp}
-                                        onChange={setOtp}
-                                        disabled={isLoading || isEmailDisabled}
-                                    />
-                                </div>
-                            )}
-                            
-                            {error && (
-                                <div className="text-red-400 text-xs text-center font-bold bg-red-900/20 p-3 rounded-xl border border-red-900/30">
-                                    {formatAuthError(error)}
-                                </div>
-                            )}
-                            
-                            <button 
-                                type="submit" 
-                                disabled={isLoading || isEmailDisabled || !email || (!(mode === 'forgot-password' && !otpSent) && !password) || (mode === 'signup' && !otpSent && !confirmPassword) || ((mode === 'signup' || mode === 'forgot-password') && otpSent && !otp)} 
-                                className="w-full py-4 bg-[#FFC107] hover:bg-yellow-400 text-black font-extrabold rounded-xl shadow-lg shadow-yellow-900/20 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400 disabled:shadow-none text-base transform active:scale-[0.98] mt-2"
-                            >
-                                {isEmailDisabled ? 'Currently Disabled' : (isLoading ? 'Processing...' : (mode === 'login' ? 'Login' : (mode === 'forgot-password' ? (otpSent ? 'Reset Password' : 'Send Code') : (otpSent ? 'Verify & Sign Up' : 'Send Code'))))}
-                            </button>
-                            
-                            {((mode === 'signup' || mode === 'forgot-password') && otpSent) && (
-                                <button
-                                    type="button"
-                                    onClick={() => { setOtpSent(false); setOtp(''); setError(''); setSuccessMessage(''); }}
-                                    className="w-full py-2 text-gray-500 hover:text-gray-900 dark:hover:text-white text-xs font-bold transition-colors"
-                                >
-                                    Change Email
-                                </button>
-                            )}
-                            
-                            {mode === 'forgot-password' && (
-                                <button
-                                    type="button"
-                                    onClick={() => { setMode('login'); setOtpSent(false); setOtp(''); setError(''); setSuccessMessage(''); setPassword(''); setConfirmPassword(''); }}
-                                    className="w-full py-2 text-gray-500 hover:text-gray-900 dark:hover:text-white text-xs font-bold transition-colors"
-                                >
-                                    Back to Login
-                                </button>
-                            )}
-                        </form>
-
-                        {mode !== 'forgot-password' && (
-                            <div className="mt-6 mb-8">
-                                <div className="relative mb-6">
-                                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200 dark:border-gray-700"></div></div>
-                                    <div className="relative flex justify-center text-xs"><span className="px-4 bg-white dark:bg-[#111] text-gray-500">or continue with</span></div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button 
-                                        onClick={() => authConfig.enableGoogleAuth ? loginWithGoogle().catch(e => setError(e.message)) : null} 
-                                        disabled={isLoading || !authConfig.enableGoogleAuth} 
-                                        className={`flex items-center justify-center gap-2 py-3 bg-gray-50 dark:bg-[#222] border border-gray-200 dark:border-gray-700 rounded-xl transition-all ${
-                                            !authConfig.enableGoogleAuth 
-                                            ? 'opacity-40 cursor-not-allowed' 
-                                            : 'hover:bg-gray-100 dark:hover:bg-gray-800 active:scale-95'
-                                        }`}
-                                    >
-                                        <GoogleIcon className="w-5 h-5" />
-                                        <span className="text-gray-900 dark:text-white font-bold text-xs">{authConfig.enableGoogleAuth ? 'Google' : 'Disabled'}</span>
-                                    </button>
-                                    <button 
-                                        onClick={() => authConfig.enableFacebookAuth ? loginWithFacebook().catch(e => setError(e.message)) : null} 
-                                    disabled={isLoading || !authConfig.enableFacebookAuth} 
-                                    className={`flex items-center justify-center gap-2 py-3 bg-gray-50 dark:bg-[#222] border border-gray-200 dark:border-gray-700 rounded-xl transition-all ${
-                                        !authConfig.enableFacebookAuth 
-                                        ? 'opacity-40 cursor-not-allowed' 
-                                        : 'hover:bg-gray-100 dark:hover:bg-gray-800 active:scale-95'
-                                    }`}
-                                >
-                                    <FacebookIcon className="w-5 h-5 text-gray-900 dark:text-white" />
-                                    <span className="text-gray-900 dark:text-white font-bold text-xs">{authConfig.enableFacebookAuth ? 'Facebook' : 'Disabled'}</span>
-                                </button>
-                            </div>
-                        </div>
-                        )}
-                    </div>
                 </div>
             </div>
             

@@ -2,6 +2,7 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Video, Token } from '../types';
+import { triggerHapticFeedback } from '../utils/telegramUtils';
 
 import CheckCircleIcon from './icons/CheckCircleIcon';
 import ClockIcon from './icons/ClockIcon';
@@ -23,7 +24,7 @@ const VideosView: React.FC<VideosViewProps> = ({ onVideoSelect }) => {
     const { state, submitVideoProof, claimTaskReward } = useContext(AppContext);
     const { 
         currentUser, adsConfig, 
-        youtubeTasks, telegramTasks, facebookTasks, 
+        youtubeTasks, facebookTasks, 
         instagramTasks, twitterTasks, tiktokTasks, appDownloadTasks, otherTasks
     } = state;
     
@@ -75,7 +76,7 @@ const VideosView: React.FC<VideosViewProps> = ({ onVideoSelect }) => {
         if (claimingTask) return;
         setClaimingTask(taskId);
         try {
-            await claimTaskReward(taskId, taskType);
+            await claimTaskReward(taskId, taskType, reward, token);
             setAdRewardData({ show: true, amount: reward, token });
         } catch (error) {
             console.error("Claim failed", error);
@@ -125,7 +126,12 @@ const VideosView: React.FC<VideosViewProps> = ({ onVideoSelect }) => {
                         return (
                             <div 
                                 key={task.id} 
-                                onClick={() => !isClaimed && !isPending && !isApproved && onVideoSelect({...task, taskType})} 
+                                onClick={() => {
+                                    if (!isClaimed && !isPending && !isApproved) {
+                                        triggerHapticFeedback('light');
+                                        onVideoSelect({...task, taskType});
+                                    }
+                                }} 
                                 className={`bg-white dark:bg-[#161B22] p-5 rounded-[2rem] border ${isClaimed ? 'border-green-500/30 opacity-70' : 'border-gray-100 dark:border-gray-700'} flex justify-between items-center cursor-pointer hover:shadow-xl transition-all hover:scale-[1.01] active:scale-95 group relative overflow-hidden gap-4`}
                             >
                                 <div className="flex items-center space-x-4 relative z-10 min-w-0 flex-1">
@@ -178,9 +184,11 @@ const VideosView: React.FC<VideosViewProps> = ({ onVideoSelect }) => {
                                                 ? 'bg-blue-500 text-white border-blue-500'
                                                 : isRejected
                                                     ? 'bg-red-500 text-white border-red-500'
-                                                    : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white border-gray-200 dark:border-gray-700 group-hover:bg-gray-200 dark:group-hover:bg-gray-700'
+                                                    : proof?.status === 'started'
+                                                        ? 'bg-yellow-500 text-white border-yellow-500'
+                                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white border-gray-200 dark:border-gray-700 group-hover:bg-gray-200 dark:group-hover:bg-gray-700'
                                         }`}>
-                                            {isClaimed ? 'Done' : isPending ? 'Wait' : isRejected ? 'Redo' : 'Start'}
+                                            {isClaimed ? 'Done' : isPending ? 'Wait' : isRejected ? 'Redo' : proof?.status === 'started' ? 'Verify' : 'Start'}
                                         </span>
                                     )}
                                 </div>
@@ -284,9 +292,7 @@ const VideosView: React.FC<VideosViewProps> = ({ onVideoSelect }) => {
             {(activeCategory === 'All' || activeCategory === 'YouTube') && renderTaskList("YouTube Bounty", youtubeTasks.filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase()) && (!t.endTime || new Date(t.endTime) > new Date())), YouTubeIcon, "text-red-600", "group-hover:bg-red-600", "youtube")}
 
             {/* Telegram Tasks */}
-            {(activeCategory === 'All' || activeCategory === 'Telegram') && renderTaskList("Telegram Tasks", telegramTasks.filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase()) && (!t.endTime || new Date(t.endTime) > new Date())), TelegramIcon, "text-blue-500", "group-hover:bg-blue-500", "telegram")}
-
-
+            {(activeCategory === 'All' || activeCategory === 'Telegram') && renderTaskList("Telegram Tasks", state.telegramTasks.filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase()) && (!t.endTime || new Date(t.endTime) > new Date())), TelegramIcon, "text-blue-500", "group-hover:bg-blue-500", "telegram")}
 
             {/* Twitter Tasks */}
             {(activeCategory === 'All' || activeCategory === 'Twitter') && renderTaskList("X (Twitter) Tasks", twitterTasks.filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase()) && (!t.endTime || new Date(t.endTime) > new Date())), TwitterIcon, "text-sky-500", "group-hover:bg-sky-500", "twitter")}

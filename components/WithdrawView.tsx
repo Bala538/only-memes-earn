@@ -1,6 +1,7 @@
 
-import React, { useState, useContext, ChangeEvent } from 'react';
+import React, { useState, useContext, ChangeEvent, useEffect, useMemo } from 'react';
 import { AppContext } from '../context/AppContext';
+import axios from 'axios';
 import { Withdrawal, Token, Transaction } from '../types';
 import ExchangeIcon from './icons/ExchangeIcon';
 import HistoryIcon from './icons/HistoryIcon';
@@ -10,7 +11,7 @@ import DownloadIcon from './icons/DownloadIcon';
 
 import WithdrawSuccessModal from './WithdrawSuccessModal';
 
-import OTPInput from './OTPInput';
+import { getApiBaseUrl } from '../utils/api';
 
 const StatusBadge: React.FC<{ status: Withdrawal['status'] }> = ({ status }) => {
     const statusStyles = {
@@ -61,11 +62,145 @@ const TokenListNew: React.FC<TokenListNewProps> = ({ tokens, onSelect, getEffect
 );
 
 const WithdrawView: React.FC = () => {
-    const { state, initiateWithdrawal, submitDepositProof, swapBalance, triggerAd } = useContext(AppContext);
+    const { state, initiateWithdrawal, submitDepositProof, swapBalance, triggerAd, uploadProofAttachment, submitUidForVerification } = useContext(AppContext);
     
     // View Navigation State
     const [currentView, setCurrentView] = useState<'main' | 'withdraw' | 'deposit' | 'swap' | 'asset_details' | 'asset_withdraw' | 'asset_deposit' | 'history'>('main');
     const [selectedToken, setSelectedToken] = useState<Token | null>(null);
+    const [selectedExchange, setSelectedExchange] = useState<string>('');
+    const [historyTab, setHistoryTab] = useState<'transactions' | 'withdrawals'>('transactions');
+    const [expandedWithdrawalId, setExpandedWithdrawalId] = useState<string | null>(null);
+    const [copiedWithdrawalId, setCopiedWithdrawalId] = useState<string | null>(null);
+
+    // UID Validation State
+    const [gameUid, setGameUid] = useState<string>('');
+    const [uidFile, setUidFile] = useState<File | null>(null);
+    const [uidPreviewUrl, setUidPreviewUrl] = useState<string>('');
+
+    const isExchangeVerified = useMemo(() => {
+        if (!state.currentUser) return false;
+        if (selectedExchange) {
+            return !!state.currentUser.exchangeUids?.[selectedExchange];
+        }
+        return !!state.currentUser.isUidVerified;
+    }, [state.currentUser, selectedExchange]);
+
+    const isPendingExchangeUid = useMemo(() => {
+        if (!state.currentUser) return false;
+        if (isExchangeVerified) return false;
+        if (selectedExchange) {
+            const hasRecordPending = !!state.currentUser.pendingExchangeUids?.[selectedExchange];
+            return hasRecordPending || !!(state.currentUser.gameUid && state.currentUser.pendingExchange === selectedExchange);
+        }
+        return !!(state.currentUser.gameUid && !state.currentUser.isUidVerified);
+    }, [state.currentUser, selectedExchange, isExchangeVerified]);
+
+    // Sync gameUid and uidPreviewUrl from user profile if already set
+    useEffect(() => {
+        setUidFile(null); // Clear any locally selected file when exchange or user updates
+        if (state.currentUser) {
+            const isRejected = selectedExchange ? !!state.currentUser.rejectedExchangeUids?.[selectedExchange] : false;
+
+            if (selectedExchange) {
+                const exchangeUid = state.currentUser.exchangeUids?.[selectedExchange];
+                if (exchangeUid && !isRejected) {
+                    setGameUid(exchangeUid);
+                } else if (state.currentUser.pendingExchangeUids?.[selectedExchange] && !isRejected) {
+                    setGameUid(state.currentUser.pendingExchangeUids[selectedExchange]);
+                } else if (state.currentUser.pendingExchange === selectedExchange && state.currentUser.gameUid && !isRejected) {
+                    setGameUid(state.currentUser.gameUid);
+                } else {
+                    setGameUid('');
+                }
+            } else {
+                if (state.currentUser.gameUid) {
+                    setGameUid(state.currentUser.gameUid);
+                } else {
+                    setGameUid('');
+                }
+            }
+            
+            if (selectedExchange) {
+                const specScreenshot = state.currentUser.exchangeScreenshotUrls?.[selectedExchange];
+                if (specScreenshot && !isRejected) {
+                    setUidPreviewUrl(specScreenshot);
+                } else if (state.currentUser.pendingExchangeScreenshots?.[selectedExchange] && !isRejected) {
+                    setUidPreviewUrl(state.currentUser.pendingExchangeScreenshots[selectedExchange]);
+                } else if (state.currentUser.pendingExchange === selectedExchange && state.currentUser.uidScreenshotUrl && !isRejected) {
+                    setUidPreviewUrl(state.currentUser.uidScreenshotUrl);
+                } else {
+                    setUidPreviewUrl('');
+                }
+            } else {
+                if (state.currentUser.uidScreenshotUrl) {
+                    setUidPreviewUrl(state.currentUser.uidScreenshotUrl);
+                } else {
+                    setUidPreviewUrl('');
+                }
+            }
+        }
+    }, [state.currentUser, selectedExchange]);
+
+    const handleUidFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setUidFile(file);
+            setUidPreviewUrl(URL.createObjectURL(file));
+        }
+    };
+
+    const uploadUidScreenshotIfNeeded = async (): Promise<string> => {
+        if (uidFile) {
+            return await uploadProofAttachment(uidFile);
+        }
+        return uidPreviewUrl;
+    };
+
+    const [uidSubmitStatus, setUidSubmitStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+    const [uidSubmitError, setUidSubmitError] = useState('');
+
+    const handleApplyUidVerification = async () => {
+        setUidSubmitError('');
+        setUidSubmitStatus('submitting');
+
+        if (!gameUid.trim()) {
+            setUidSubmitError('UID is required.');
+            setUidSubmitStatus('error');
+            return;
+        }
+
+        if (!uidPreviewUrl && !uidFile) {
+            setUidSubmitError('A screenshot of the UID is required.');
+            setUidSubmitStatus('error');
+            return;
+        }
+
+        // Check uniqueness of UID
+        try {
+            const checkResponse = await axios.post('/api/withdraw/check-uid', { uid: gameUid.trim(), email: state.currentUser?.email });
+            if (checkResponse.data && checkResponse.data.exists) {
+                setUidSubmitError("This UID already exists and is linked to another account.");
+                setUidSubmitStatus('error');
+                return;
+            }
+        } catch (err: any) {
+            console.error("UID check failed:", err);
+        }
+
+        try {
+            const uploadedUrl = await uploadUidScreenshotIfNeeded();
+            if (!uploadedUrl) {
+                throw new Error("Failed to upload screenshot. Please try again.");
+            }
+
+            await submitUidForVerification(gameUid.trim(), uploadedUrl, selectedExchange);
+            setUidSubmitStatus('success');
+        } catch (err: any) {
+            console.error("UID verification application failed:", err);
+            setUidSubmitError(err.message || "Failed to submit UID verification.");
+            setUidSubmitStatus('error');
+        }
+    };
 
     // Withdraw Form State
     const [recipientAddress, setRecipientAddress] = useState('');
@@ -73,7 +208,6 @@ const WithdrawView: React.FC = () => {
     const [formStatus, setFormStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
     const [formError, setFormError] = useState('');
     const [withdrawMethod, setWithdrawMethod] = useState<Withdrawal['method']>('uid');
-    const [selectedExchange, setSelectedExchange] = useState<string>('');
 
     // Deposit Form State
     const [depositAmount, setDepositAmount] = useState('');
@@ -96,11 +230,6 @@ const WithdrawView: React.FC = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [hasVerified, setHasVerified] = useState(false);
     
-    // OTP State
-    const [otpSent, setOtpSent] = useState(false);
-    const [otp, setOtp] = useState('');
-    const [isSendingOtp, setIsSendingOtp] = useState(false);
-    
     // Success Modal State
     const [successModalData, setSuccessModalData] = useState<WithdrawalDetails | null>(null);
 
@@ -108,8 +237,11 @@ const WithdrawView: React.FC = () => {
     const allWithdrawals = state.currentUser?.withdrawals || [];
     const transactionHistory = state.currentUser?.tapGameData?.history || [];
     
-    // Filter out internal game transactions (those without a specific token)
-    const walletTransactions = transactionHistory.filter(tx => !!tx.token);
+    // Include all transactions, mapping those without a specific token to 'USHA' (the primary reward token)
+    const walletTransactions = transactionHistory.map(tx => ({
+        ...tx,
+        token: tx.token || 'USHA'
+    }));
 
     const withdrawalSettings = state.withdrawalSettings;
     const availableTokens = state.availableTokens;
@@ -172,7 +304,7 @@ const WithdrawView: React.FC = () => {
         setFormStatus('idle');
         setWithdrawMethod('uid'); // Defaulting to UID for simplicity as per requirement
         
-        const exchanges = withdrawalSettings[token]?.exchangeName?.split(',').map(e => e.trim()).filter(Boolean) || [];
+        const exchanges = (state.exchanges || []).filter(e => e.enabled).map(e => e.name);
         setSelectedExchange(exchanges.length > 0 ? exchanges[0] : '');
     };
 
@@ -191,8 +323,8 @@ const WithdrawView: React.FC = () => {
         }
         
         const settings = withdrawalSettings[token];
-        // Check if deposits are explicitly disabled in settings
-        if (settings && settings.depositEnabled === false) {
+        // Deposits are disabled by default for all coins unless explicitly enabled
+        if (!settings || settings.depositEnabled !== true) {
             alert(`Deposits for ${token} are currently disabled.`);
             return;
         }
@@ -210,7 +342,7 @@ const WithdrawView: React.FC = () => {
         handleStartDeposit(selectedToken);
         // Only switch view if we successfully started the deposit process (i.e. not USHA and enabled)
         const settings = withdrawalSettings[selectedToken];
-        const isEnabled = !settings || settings.depositEnabled !== false;
+        const isEnabled = settings && settings.depositEnabled === true;
         
         if (selectedToken !== 'USHA' && isEnabled) {
             setCurrentView('asset_deposit');
@@ -315,7 +447,7 @@ const WithdrawView: React.FC = () => {
         const amount = parseFloat(swapAmount) || 0;
         const settings = withdrawalSettings[swapToToken];
         
-        let rate = settings?.swapRate ?? 1;
+        let rate = settings?.swapRate ?? 0;
         
         // Check if there's a market for this pair to use real-time price
         const market = state.markets.find(m => 
@@ -387,12 +519,25 @@ const WithdrawView: React.FC = () => {
         setAmountInput(balance.toString());
     }
 
-    const handleWithdrawClick = () => {
+    const handleWithdrawClick = async () => {
         setFormError('');
         if (!selectedToken) return;
+
+        if (!isExchangeVerified) {
+            setFormError('Your exchange UID has not been verified by the admin yet.');
+            return;
+        }
+
+        if (!gameUid.trim()) {
+            setFormError('UID is required.');
+            return;
+        }
         
-        if (!recipientAddress.trim()) {
-            setFormError(`Recipient address/ID is required.`);
+        const isUidMethod = withdrawalSettings[selectedToken]?.methodLabel?.toUpperCase() === 'UID';
+        const finalRecipientAddress = isUidMethod ? gameUid.trim() : recipientAddress.trim();
+
+        if (!finalRecipientAddress) {
+            setFormError(`${withdrawalSettings[selectedToken]?.methodLabel || 'Recipient address/ID'} is required.`);
             return;
         }
 
@@ -402,7 +547,7 @@ const WithdrawView: React.FC = () => {
             return;
         }
         
-        const availableExchanges = withdrawalSettings[selectedToken]?.exchangeName?.split(',').map(e => e.trim()).filter(Boolean) || [];
+        const availableExchanges = (state.exchanges || []).filter(e => e.enabled).map(e => e.name);
         if (availableExchanges.length > 0 && !selectedExchange) {
             setFormError('Please select an exchange.');
             return;
@@ -431,10 +576,25 @@ const WithdrawView: React.FC = () => {
             return;
         }
 
+        // Check uniqueness of UID on click
+        setIsSubmitting(true);
+        try {
+            const response = await axios.post('/api/withdraw/check-uid', { uid: gameUid.trim(), email: state.currentUser?.email });
+            if (response.data && response.data.exists) {
+                setFormError("This UID already exists and is linked to another account.");
+                setIsSubmitting(false);
+                return;
+            }
+        } catch (err: any) {
+            console.error("UID check failed:", err);
+        } finally {
+            setIsSubmitting(false);
+        }
+
         setWithdrawalDetails({
             amount: amount,
             token: selectedToken,
-            recipientAddress,
+            recipientAddress: finalRecipientAddress,
             exchange: selectedExchange || undefined
         });
         setHasVerified(false);
@@ -443,71 +603,53 @@ const WithdrawView: React.FC = () => {
 
     const confirmWithdrawal = async () => {
         if (!withdrawalDetails || !hasVerified) return;
-        
-        if (!otpSent) {
-            setIsSendingOtp(true);
-            setModalError('');
-            try {
-                const API_BASE = import.meta.env.VITE_API_URL || '';
-                const res = await fetch(API_BASE + '/api/auth/send-otp', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: state.currentUser?.email })
-                });
-                
-                let data;
-                const contentType = res.headers.get("content-type");
-                if (contentType && contentType.indexOf("application/json") !== -1) {
-                    data = await res.json();
-                } else {
-                    const text = await res.text();
-                    console.error("Non-JSON response from /api/auth/send-otp:", text);
-                    throw new Error("Server returned an invalid response. Please ensure the backend is running.");
-                }
-
-                if (!res.ok) throw new Error(data.error || 'Failed to send OTP');
-                setOtpSent(true);
-            } catch (err: any) {
-                setModalError(err.message);
-            } finally {
-                setIsSendingOtp(false);
-            }
-            return;
-        }
-
-        if (!otp) {
-            setModalError('Please enter the OTP sent to your email.');
-            return;
-        }
 
         setFormStatus('processing');
         setIsSubmitting(true);
         setModalError('');
+
+        // Pre-check UID uniqueness again just before finalizing
         try {
-            // Verify OTP
-            const API_BASE = import.meta.env.VITE_API_URL || '';
-            const verifyRes = await fetch(API_BASE + '/api/auth/verify-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: state.currentUser?.email, otp })
-            });
-            
-            let verifyData;
-            const contentType = verifyRes.headers.get("content-type");
-            if (contentType && contentType.indexOf("application/json") !== -1) {
-                verifyData = await verifyRes.json();
-            } else {
-                const text = await verifyRes.text();
-                console.error("Non-JSON response from /api/auth/verify-otp:", text);
-                throw new Error("Server returned an invalid response. Please ensure the backend is running.");
+            const checkResponse = await axios.post('/api/withdraw/check-uid', { uid: gameUid.trim(), email: state.currentUser?.email });
+            if (checkResponse.data && checkResponse.data.exists) {
+                throw new Error("This UID already exists and is linked to another account.");
             }
+        } catch (err: any) {
+            setModalError(err.message || "Failed to verify UID uniqueness.");
+            setIsSubmitting(false);
+            setFormStatus('error');
+            return;
+        }
 
-            if (!verifyRes.ok) throw new Error(verifyData.error || 'Invalid OTP');
+        // Upload UID Screenshot if a new one was selected and not verified yet
+        let finalUidScreenshotUrl = state.currentUser?.uidScreenshotUrl || '';
+        if (!isExchangeVerified) {
+            try {
+                finalUidScreenshotUrl = await uploadUidScreenshotIfNeeded();
+                if (!finalUidScreenshotUrl) {
+                    throw new Error("UID screenshot required.");
+                }
+            } catch (err: any) {
+                setModalError("Failed to upload UID screenshot: " + err.message);
+                setIsSubmitting(false);
+                setFormStatus('error');
+                return;
+            }
+        }
 
+        try {
             // Show Rewarded Ad before confirming
             await triggerAd('rewarded');
 
-            const txId = await initiateWithdrawal(withdrawalDetails.recipientAddress, withdrawalDetails.token, withdrawalDetails.amount, withdrawMethod, withdrawalDetails.exchange);
+            const txId = await initiateWithdrawal(
+                withdrawalDetails.recipientAddress, 
+                withdrawalDetails.token, 
+                withdrawalDetails.amount, 
+                withdrawMethod, 
+                withdrawalDetails.exchange,
+                gameUid.trim(),
+                finalUidScreenshotUrl
+            );
             
             // Set Success Data for Modal
             setSuccessModalData({
@@ -520,8 +662,6 @@ const WithdrawView: React.FC = () => {
             setAmountInput('');
             setIsConfirming(false); // Close confirm modal
             setHasVerified(false);
-            setOtpSent(false);
-            setOtp('');
             
             // Note: We don't clear selectedToken yet so user can see context, but Success Modal takes over
         } catch (err: any) {
@@ -560,21 +700,10 @@ const WithdrawView: React.FC = () => {
         const settings = withdrawalSettings[selectedToken];
         // Use configured address or fallback to generated one
         const depositAddress = settings?.depositAddress || getDepositAddress(selectedToken);
-        // Use configured QR code or fallback to generated one
-        const qrCodeUrl = settings?.depositQrCodeUrl 
-            ? settings.depositQrCodeUrl 
-            : `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${depositAddress}`;
 
         return (
             <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 text-center">
-                <div className="inline-block p-2 bg-gray-100 dark:bg-white rounded-lg mb-4">
-                    <img 
-                        src={qrCodeUrl} 
-                        alt="Deposit QR Code" 
-                        className="w-40 h-40 object-contain" 
-                    />
-                </div>
-                <p className="text-gray-400 text-sm mb-2">Send only {selectedToken} ({withdrawalSettings[selectedToken]?.network || 'Standard'}) to this address.</p>
+                <p className="text-gray-400 text-sm mb-4">Send only {selectedToken} ({withdrawalSettings[selectedToken]?.network || 'Standard'}) to this address.</p>
                 
                 <div className="bg-gray-100 dark:bg-gray-900 p-3 rounded-lg border border-gray-200 dark:border-gray-600 flex items-center justify-between mb-6 group cursor-pointer" onClick={() => copyToClipboard(depositAddress)}>
                     <span className="font-mono text-xs text-gray-700 dark:text-gray-300 truncate mr-2">{depositAddress}</span>
@@ -665,6 +794,10 @@ const WithdrawView: React.FC = () => {
                                 <span className="text-gray-900 dark:text-white font-mono truncate max-w-[150px]">{withdrawalDetails.recipientAddress}</span>
                             </div>
                             <div className="flex justify-between text-sm">
+                                <span className="text-gray-500 dark:text-gray-400">UID</span>
+                                <span className="text-gray-900 dark:text-white font-mono truncate max-w-[150px]">{gameUid}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
                                 <span className="text-gray-500 dark:text-gray-400">Network</span>
                                 <span className="text-gray-900 dark:text-white">{withdrawalSettings[withdrawalDetails.token]?.network || 'Standard'}</span>
                             </div>
@@ -679,28 +812,16 @@ const WithdrawView: React.FC = () => {
                             <span className="text-xs text-gray-400 group-hover:text-gray-300 transition-colors">I confirm that the address is correct and on the right network.</span>
                         </label>
 
-                        {otpSent && (
-                            <div className="mb-6">
-                                <label className="block text-sm font-medium text-gray-400 mb-2">Enter 6-digit OTP</label>
-                                <OTPInput 
-                                    value={otp}
-                                    onChange={setOtp}
-                                    disabled={isSubmitting}
-                                />
-                                <p className="text-xs text-gray-500 mt-2 text-center">An OTP has been sent to your email.</p>
-                            </div>
-                        )}
-
                         {modalError && <p className="text-red-500 text-sm mb-4 text-center">{modalError}</p>}
 
                         <div className="grid grid-cols-2 gap-3">
                             <button onClick={closeModal} className="py-3 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white font-bold hover:bg-gray-300 dark:hover:bg-gray-600 transition">Cancel</button>
                             <button 
                                 onClick={confirmWithdrawal} 
-                                disabled={!hasVerified || formStatus === 'processing' || isSendingOtp || (otpSent && otp.length < 6)}
+                                disabled={!hasVerified || formStatus === 'processing'}
                                 className="py-3 rounded-lg bg-green-600 text-white font-bold hover:bg-green-500 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                             >
-                                {isSubmitting || isSendingOtp ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : (otpSent ? 'Confirm' : 'Send OTP')}
+                                {isSubmitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : 'Confirm'}
                             </button>
                         </div>
                     </div>
@@ -722,8 +843,13 @@ const WithdrawView: React.FC = () => {
                                     <div className="bg-green-500/20 p-2 rounded-full mb-1"><DownloadIcon className="w-5 h-5 text-green-600 dark:text-green-400" /></div>
                                     <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Deposit</span>
                                 </button>
-                                <button onClick={() => setCurrentView('withdraw')} className="flex flex-col items-center p-3 bg-gray-100 dark:bg-white/5 rounded-lg hover:bg-gray-200 dark:hover:bg-white/10 transition">
-                                    <div className="bg-red-500/20 p-2 rounded-full mb-1"><UploadIcon className="w-5 h-5 text-red-600 dark:text-red-400" /></div>
+                                <button 
+                                    onClick={() => setCurrentView('withdraw')} 
+                                    className="flex flex-col items-center p-3 bg-gray-100 dark:bg-white/5 rounded-lg hover:bg-gray-200 dark:hover:bg-white/10 transition"
+                                >
+                                    <div className="p-2 bg-red-500/20 text-red-600 dark:text-red-400 rounded-full mb-1">
+                                        <UploadIcon className="w-5 h-5" />
+                                    </div>
                                     <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Withdraw</span>
                                 </button>
                                 <button onClick={() => setCurrentView('swap')} className="flex flex-col items-center p-3 bg-gray-100 dark:bg-white/5 rounded-lg hover:bg-gray-200 dark:hover:bg-white/10 transition">
@@ -797,7 +923,7 @@ const WithdrawView: React.FC = () => {
                                 </button>
                                 <button 
                                     onClick={handleStartAssetWithdraw}
-                                    className="flex items-center justify-center py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold transition shadow-lg shadow-red-900/20"
+                                    className="flex items-center justify-center py-3 rounded-xl font-bold transition shadow-lg bg-red-600 hover:bg-red-500 text-white shadow-red-900/20"
                                 >
                                     <UploadIcon className="w-5 h-5 mr-2" /> Withdraw
                                 </button>
@@ -847,33 +973,269 @@ const WithdrawView: React.FC = () => {
                         <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
                         Back
                     </button>
+                    
                     <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Transaction History</h2>
-                    {walletTransactions.length > 0 ? (
-                        <div className="space-y-2">
-                            {walletTransactions.slice().reverse().map((tx, idx) => (
-                                <div key={tx.id || idx} className="p-3 bg-white dark:bg-[#161B22] rounded-lg border border-gray-100 dark:border-gray-700 flex justify-between items-center">
-                                    <div className="flex items-center space-x-3">
-                                        <div className={`p-2 rounded-full ${tx.isPositive ? 'bg-green-100 dark:bg-green-900/20' : 'bg-red-100 dark:bg-red-900/20'}`}>
-                                            {tx.isPositive ? <DownloadIcon className="w-4 h-4 text-green-600 dark:text-green-400" /> : <UploadIcon className="w-4 h-4 text-red-600 dark:text-red-400" />}
+
+                    {/* Tab Selection */}
+                    <div className="flex bg-gray-100 dark:bg-gray-800/60 p-1 rounded-xl mb-6 border border-gray-200 dark:border-gray-700">
+                        <button
+                            onClick={() => setHistoryTab('transactions')}
+                            className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${
+                                historyTab === 'transactions'
+                                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                            }`}
+                        >
+                            Wallet Activities
+                        </button>
+                        <button
+                            onClick={() => setHistoryTab('withdrawals')}
+                            className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${
+                                historyTab === 'withdrawals'
+                                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                            }`}
+                        >
+                            Withdrawal History
+                        </button>
+                    </div>
+
+                    {historyTab === 'transactions' ? (
+                        walletTransactions.length > 0 ? (
+                            <div className="space-y-2">
+                                {walletTransactions.slice().reverse().map((tx, idx) => (
+                                    <div key={tx.id || idx} className="p-3 bg-white dark:bg-[#161B22] rounded-lg border border-gray-100 dark:border-gray-700 flex justify-between items-center">
+                                        <div className="flex items-center space-x-3">
+                                            <div className={`p-2 rounded-full ${tx.isPositive ? 'bg-green-100 dark:bg-green-900/20' : 'bg-red-100 dark:bg-red-900/20'}`}>
+                                                {tx.isPositive ? <DownloadIcon className="w-4 h-4 text-green-600 dark:text-green-400" /> : <UploadIcon className="w-4 h-4 text-red-600 dark:text-red-400" />}
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-bold text-gray-900 dark:text-white">{tx.type}</p>
+                                                <p className="text-xs text-gray-500">{new Date(tx.date).toLocaleDateString()} {new Date(tx.date).toLocaleTimeString()}</p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="text-sm font-bold text-gray-900 dark:text-white">{tx.type}</p>
-                                            <p className="text-xs text-gray-500">{new Date(tx.date).toLocaleDateString()} {new Date(tx.date).toLocaleTimeString()}</p>
+                                        <div className="text-right">
+                                            <p className={`font-mono text-sm font-bold ${tx.isPositive ? 'text-green-500' : 'text-red-500'}`}>
+                                                {tx.isPositive ? '+' : '-'}{tx.amount}
+                                            </p>
+                                            {tx.token && <p className="text-xs text-gray-500">{tx.token}</p>}
                                         </div>
                                     </div>
-                                    <div className="text-right">
-                                        <p className={`font-mono text-sm font-bold ${tx.isPositive ? 'text-green-500' : 'text-red-500'}`}>
-                                            {tx.isPositive ? '+' : '-'}{tx.amount}
-                                        </p>
-                                        {tx.token && <p className="text-xs text-gray-500">{tx.token}</p>}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-center py-12 text-gray-500 bg-gray-50 dark:bg-gray-800/30 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
+                                <p className="text-sm">No transactions yet</p>
+                            </div>
+                        )
                     ) : (
-                        <div className="text-center py-12 text-gray-500 bg-gray-50 dark:bg-gray-800/30 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
-                            <p className="text-sm">No transactions yet</p>
-                        </div>
+                        /* Withdrawal History Real-Time Component */
+                        allWithdrawals.length > 0 ? (
+                            <div className="space-y-3">
+                                {allWithdrawals.slice().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map((w) => {
+                                    const isExpanded = expandedWithdrawalId === w.id;
+                                    const isCopied = copiedWithdrawalId === w.id;
+                                    
+                                    const handleCopyToClipboard = (e: React.MouseEvent, text: string, copyId: string) => {
+                                        e.stopPropagation();
+                                        navigator.clipboard.writeText(text);
+                                        setCopiedWithdrawalId(copyId);
+                                        setTimeout(() => setCopiedWithdrawalId(null), 2000);
+                                    };
+
+                                    return (
+                                        <div key={w.id} className="bg-white dark:bg-[#161B22] rounded-xl border border-gray-100 dark:border-gray-800 hover:border-gray-200 dark:hover:border-gray-700 transition-all overflow-hidden shadow-sm">
+                                            {/* Header / Clickable Area */}
+                                            <div 
+                                                onClick={() => setExpandedWithdrawalId(isExpanded ? null : w.id)}
+                                                className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-50/50 dark:hover:bg-zinc-900/40 select-none transition-colors"
+                                            >
+                                                <div className="flex items-center space-x-3">
+                                                    <div className="p-2 bg-orange-500/10 dark:bg-orange-500/20 rounded-full">
+                                                        <TokenIcon token={w.token} className="w-6 h-6" />
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="font-bold text-gray-900 dark:text-white text-base">
+                                                                {w.amount.toLocaleString()} {w.token}
+                                                            </span>
+                                                            {w.exchange && (
+                                                                <span className="text-[10px] font-extrabold tracking-wider uppercase px-1.5 py-0.5 bg-orange-100 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-md">
+                                                                    {w.exchange}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                                                            {new Date(w.timestamp).toLocaleDateString()} at {new Date(w.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center space-x-3">
+                                                    <StatusBadge status={w.status} />
+                                                    <svg 
+                                                        className={`w-5 h-5 text-gray-400 dark:text-gray-500 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} 
+                                                        fill="none" 
+                                                        stroke="currentColor" 
+                                                        viewBox="0 0 24 24"
+                                                    >
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                                                    </svg>
+                                                </div>
+                                            </div>
+
+                                            {/* Collapsible Details Area */}
+                                            {isExpanded && (
+                                                <div className="border-t border-gray-100 dark:border-gray-800 bg-gray-50/30 dark:bg-zinc-900/20 p-4 space-y-4 animate-fade-in text-sm text-gray-600 dark:text-gray-300">
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                        {/* Details Block */}
+                                                        <div className="space-y-2">
+                                                            <div className="flex justify-between items-center py-1 border-b border-gray-100 dark:border-gray-800/50">
+                                                                <span className="text-xs text-gray-400 dark:text-gray-500 font-medium">Request ID</span>
+                                                                <button 
+                                                                    onClick={(e) => handleCopyToClipboard(e, w.id, w.id)}
+                                                                    className="text-xs font-mono text-gray-500 dark:text-gray-400 hover:text-orange-500 flex items-center gap-1 transition-colors bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded"
+                                                                >
+                                                                    {w.id.substring(0, 8)}... {isCopied ? 'Copied!' : 'Copy'}
+                                                                </button>
+                                                            </div>
+                                                            
+                                                            <div className="flex justify-between items-center py-1 border-b border-gray-100 dark:border-gray-800/50">
+                                                                <span className="text-xs text-gray-400 dark:text-gray-500 font-medium">Payout Method</span>
+                                                                <span className="font-semibold text-gray-800 dark:text-gray-200 uppercase text-xs">{w.method}</span>
+                                                            </div>
+
+                                                            {w.gameUid && (
+                                                                <div className="flex justify-between items-center py-1 border-b border-gray-100 dark:border-gray-800/50">
+                                                                    <span className="text-xs text-gray-400 dark:text-gray-500 font-medium">Game Account UID</span>
+                                                                    <div className="flex items-center space-x-2">
+                                                                        <span className="font-mono font-bold text-gray-800 dark:text-gray-200 text-xs">{w.gameUid}</span>
+                                                                        {(state.currentUser?.exchangeUids?.[w.exchange || ''] === w.gameUid || (state.currentUser?.isUidVerified && state.currentUser?.gameUid === w.gameUid)) && (
+                                                                            <span className="text-[10px] font-bold bg-green-500/15 text-green-600 dark:text-green-400 border border-green-500/25 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                                                                <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                                                                                Verified
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {w.recipientAddress && (
+                                                                <div className="flex flex-col py-1 border-b border-gray-100 dark:border-gray-800/50 gap-0.5">
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-xs text-gray-400 dark:text-gray-500 font-medium">Recipient Address</span>
+                                                                        <button 
+                                                                            onClick={(e) => handleCopyToClipboard(e, w.recipientAddress, w.id + '_addr')}
+                                                                            className="text-[10px] text-orange-500 hover:underline transition-all"
+                                                                        >
+                                                                            {copiedWithdrawalId === w.id + '_addr' ? 'Copied!' : 'Copy'}
+                                                                        </button>
+                                                                    </div>
+                                                                    <span className="font-mono text-xs text-gray-800 dark:text-gray-200 break-all select-all">
+                                                                        {w.recipientAddress}
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Screenshot Visual Column if present */}
+                                                        {w.uidScreenshotUrl && (
+                                                            <div className="flex flex-col gap-1.5 bg-gray-50 dark:bg-[#1C2128] p-3 rounded-lg border border-gray-200/50 dark:border-gray-800">
+                                                                <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">Linked UID Screenshot</span>
+                                                                <a 
+                                                                    href={w.uidScreenshotUrl} 
+                                                                    target="_blank" 
+                                                                    rel="noreferrer" 
+                                                                    className="relative rounded overflow-hidden aspect-video border border-gray-300 dark:border-gray-700 bg-black block group"
+                                                                >
+                                                                    <img 
+                                                                        src={w.uidScreenshotUrl} 
+                                                                        alt="UID Verification Attachment" 
+                                                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                                                    />
+                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                                        <span className="text-xs font-bold text-white bg-black/60 px-2 py-1 rounded-md">View Original</span>
+                                                                    </div>
+                                                                </a>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Progress timeline visualizer */}
+                                                    <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+                                                        <span className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 block mb-3">
+                                                            Status Timeline (Real-Time)
+                                                        </span>
+                                                        
+                                                        <div className="relative flex justify-between items-center max-w-md mx-auto py-2 px-2">
+                                                            {/* Connector Line */}
+                                                            <div className="absolute top-1/2 left-4 right-4 h-1 bg-gray-200 dark:bg-gray-800 -translate-y-1/2 rounded-full z-0">
+                                                                <div 
+                                                                    className={`h-full bg-orange-500 rounded-full transition-all duration-500 ${
+                                                                        w.status === 'completed' ? 'w-full' : w.status === 'processing' ? 'w-1/2' : 'w-0'
+                                                                    }`} 
+                                                                />
+                                                            </div>
+
+                                                            {/* Step 1: Requested */}
+                                                            <div className="relative z-10 flex flex-col items-center">
+                                                                <div className="w-7 h-7 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold text-xs shadow-md shadow-orange-500/20">
+                                                                    ✓
+                                                                </div>
+                                                                <span className="text-[10px] font-bold text-gray-900 dark:text-white mt-1.5">Submitted</span>
+                                                            </div>
+
+                                                            {/* Step 2: Processing */}
+                                                            <div className="relative z-10 flex flex-col items-center">
+                                                                <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition-all shadow-md ${
+                                                                    w.status === 'processing' || w.status === 'completed'
+                                                                    ? 'bg-orange-500 text-white shadow-orange-500/20'
+                                                                    : 'bg-gray-200 dark:bg-gray-800 text-gray-400'
+                                                                }`}>
+                                                                    {w.status === 'processing' ? (
+                                                                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                                                    ) : w.status === 'completed' ? '✓' : '2'}
+                                                                </div>
+                                                                <span className={`text-[10px] font-bold mt-1.5 ${
+                                                                    w.status === 'processing' || w.status === 'completed' ? 'text-gray-900 dark:text-white' : 'text-gray-400'
+                                                                }`}>
+                                                                    Approved
+                                                                </span>
+                                                            </div>
+
+                                                            {/* Step 3: Completed or Rejected */}
+                                                            <div className="relative z-10 flex flex-col items-center">
+                                                                <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition-all shadow-md ${
+                                                                    w.status === 'completed'
+                                                                    ? 'bg-green-500 text-white shadow-green-500/20'
+                                                                    : w.status === 'rejected'
+                                                                    ? 'bg-red-500 text-white shadow-red-500/20'
+                                                                    : 'bg-gray-200 dark:bg-gray-800 text-gray-400'
+                                                                }`}>
+                                                                    {w.status === 'completed' ? '✓' : w.status === 'rejected' ? '✗' : '3'}
+                                                                </div>
+                                                                <span className={`text-[10px] font-bold mt-1.5 ${
+                                                                    w.status === 'completed' 
+                                                                    ? 'text-green-500' 
+                                                                    : w.status === 'rejected' 
+                                                                    ? 'text-red-500 font-black' 
+                                                                    : 'text-gray-400'
+                                                                }`}>
+                                                                    {w.status === 'rejected' ? 'Rejected' : 'Completed'}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="text-center py-12 text-gray-500 bg-gray-50 dark:bg-gray-800/30 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
+                                <p className="text-sm">No withdrawal history found</p>
+                            </div>
+                        )
                     )}
                 </div>
             )}
@@ -901,7 +1263,7 @@ const WithdrawView: React.FC = () => {
 
                             <div className="space-y-4">
                                 {(() => {
-                                    const availableExchanges = withdrawalSettings[selectedToken]?.exchangeName?.split(',').map(e => e.trim()).filter(Boolean) || [];
+                                    const availableExchanges = (state.exchanges || []).filter(e => e.enabled).map(e => e.name);
                                     if (availableExchanges.length > 0) {
                                         return (
                                             <div>
@@ -926,55 +1288,168 @@ const WithdrawView: React.FC = () => {
                                     }
                                     return null;
                                 })()}
-                                
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-400 mb-1">{withdrawalSettings[selectedToken]?.methodLabel || 'Recipient Address'}</label>
-                                    <input 
-                                        type="text" 
-                                        value={recipientAddress}
-                                        onChange={e => setRecipientAddress(e.target.value)}
-                                        placeholder={`Enter ${withdrawalSettings[selectedToken]?.methodLabel || 'Address'}`}
-                                        className="w-full bg-white dark:bg-gray-900 text-gray-900 dark:text-white p-3 rounded-lg border border-gray-300 dark:border-gray-600 focus:border-orange-500 focus:outline-none"
-                                        step="any"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-400 mb-1">Amount</label>
-                                    <div className="relative">
-                                        <input 
-                                            type="number" 
-                                            value={amountInput}
-                                            onChange={e => setAmountInput(e.target.value)}
-                                            placeholder="0.00"
-                                            className="w-full bg-white dark:bg-gray-900 text-gray-900 dark:text-white p-3 rounded-lg border border-gray-300 dark:border-gray-600 focus:border-orange-500 focus:outline-none pr-16"
-                                            step="any"
-                                        />
-                                        <button 
-                                            onClick={handleSetMax}
-                                            className="absolute right-2 top-2 bottom-2 px-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-xs font-bold text-gray-900 dark:text-white rounded-md transition"
-                                        >
-                                            MAX
-                                        </button>
-                                    </div>
-                                    <div className="flex justify-between mt-1 text-xs text-gray-500">
-                                        <span>Min: {(withdrawalSettings[selectedToken]?.minAmount ?? 0).toLocaleString()}</span>
-                                        <span>Fee: 0 {selectedToken}</span>
-                                    </div>
-                                </div>
+                                                          {isExchangeVerified ? (
+                                    <>
+                                        {withdrawalSettings[selectedToken]?.methodLabel?.toUpperCase() !== 'UID' && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-400 mb-1">{withdrawalSettings[selectedToken]?.methodLabel || 'Recipient Address'}</label>
+                                                <input 
+                                                    type="text" 
+                                                    value={recipientAddress}
+                                                    onChange={e => setRecipientAddress(e.target.value)}
+                                                    placeholder={`Enter ${withdrawalSettings[selectedToken]?.methodLabel || 'Address'}`}
+                                                    className="w-full bg-white dark:bg-gray-900 text-gray-900 dark:text-white p-3 rounded-lg border border-gray-300 dark:border-gray-600 focus:border-orange-500 focus:outline-none"
+                                                    step="any"
+                                                />
+                                            </div>
+                                        )}
 
-                                {formError && (
-                                    <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-lg text-sm flex items-center space-x-2">
-                                        <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                        <span>{formError}</span>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-400 mb-1">Your Verified UID for {selectedExchange || 'Default'}</label>
+                                            <input 
+                                                type="text" 
+                                                value={gameUid}
+                                                placeholder="Verified UID"
+                                                className="w-full bg-white dark:bg-gray-900 text-gray-900 dark:text-white p-3 rounded-lg border border-gray-300 dark:border-gray-600 focus:border-orange-500 focus:outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                                                disabled={true}
+                                            />
+                                            <p className="text-xs text-green-500 mt-1 flex items-center gap-1">
+                                                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                                ✓ Verified UID: {gameUid} for {selectedExchange || 'Default'}
+                                            </p>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-400 mb-1">Amount</label>
+                                            <div className="relative">
+                                                <input 
+                                                    type="number" 
+                                                    value={amountInput}
+                                                    onChange={e => setAmountInput(e.target.value)}
+                                                    placeholder="0.00"
+                                                    className="w-full bg-white dark:bg-gray-900 text-gray-900 dark:text-white p-3 rounded-lg border border-gray-300 dark:border-gray-600 focus:border-orange-500 focus:outline-none pr-16"
+                                                    step="any"
+                                                />
+                                                <button 
+                                                    onClick={handleSetMax}
+                                                    className="absolute right-2 top-2 bottom-2 px-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-xs font-bold text-gray-900 dark:text-white rounded-md transition"
+                                                >
+                                                    MAX
+                                                </button>
+                                            </div>
+                                            <div className="flex justify-between mt-1 text-xs text-gray-500">
+                                                <span>Min: {(withdrawalSettings[selectedToken]?.minAmount ?? 0).toLocaleString()}</span>
+                                                <span>Fee: 0 {selectedToken}</span>
+                                            </div>
+                                        </div>
+
+                                        {formError && (
+                                            <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-lg text-sm flex items-center space-x-2">
+                                                <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                <span>{formError}</span>
+                                            </div>
+                                        )}
+
+                                        <button 
+                                            onClick={handleWithdrawClick}
+                                            className="w-full py-4 bg-orange-600 hover:bg-orange-500 text-white font-bold rounded-lg shadow-lg shadow-orange-600/20 transition-all mt-2"
+                                        >
+                                            Review Withdrawal
+                                        </button>
+                                    </>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {state.currentUser?.rejectedExchangeUids?.[selectedExchange || "Default"] && (
+                                            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-600 dark:text-red-400">
+                                                <h4 className="font-bold mb-1 flex items-center gap-1.5">
+                                                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                    </svg>
+                                                    Verification Request Rejected
+                                                </h4>
+                                                <p className="text-xs leading-relaxed">
+                                                    Your previous UID verification request for <strong>{selectedExchange || 'Default'}</strong> was rejected by the admin. Please enter your correct UID, upload a new profile screenshot, and re-submit.
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-sm text-yellow-600 dark:text-yellow-400">
+                                            <h4 className="font-bold mb-1 flex items-center gap-1.5">
+                                                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                </svg>
+                                                Exchange UID Verification Required
+                                            </h4>
+                                            <p className="text-xs leading-relaxed">
+                                                You must verify your exchange UID for <strong>{selectedExchange || 'your selected exchange'}</strong> before requesting withdrawals. Please enter your exchange UID and upload a screenshot of your exchange profile showing your UID. After the admin approves your UID, you can make withdrawals instantly.
+                                            </p>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-400 mb-1">Enter your UID for {selectedExchange}</label>
+                                            <input 
+                                                type="text" 
+                                                value={gameUid}
+                                                onChange={e => setGameUid(e.target.value)}
+                                                placeholder={`Enter ${selectedExchange} UID`}
+                                                className="w-full bg-white dark:bg-gray-900 text-gray-900 dark:text-white p-3 rounded-lg border border-gray-300 dark:border-gray-600 focus:border-orange-500 focus:outline-none disabled:opacity-75 disabled:cursor-not-allowed"
+                                                disabled={isPendingExchangeUid}
+                                            />
+                                            {isPendingExchangeUid ? (
+                                                <p className="text-xs text-yellow-500 mt-1.5 flex items-center gap-1.5">
+                                                    <span className="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span>
+                                                    ⚠ UID verification for {selectedExchange} is pending admin approval. You will be notified once verified.
+                                                </p>
+                                            ) : null}
+                                        </div>
+
+                                        {!isPendingExchangeUid && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-400 mb-2">Upload Screenshot of the UID</label>
+                                                <div className="relative border-2 border-dashed border-gray-600 rounded-lg p-4 hover:bg-gray-700/30 transition text-center cursor-pointer">
+                                                    <input type="file" onChange={handleUidFileChange} accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                                                    {uidPreviewUrl ? (
+                                                        <div className="relative">
+                                                            <img src={uidPreviewUrl} alt="UID Screenshot Preview" className="max-h-32 mx-auto rounded-md" />
+                                                            {!state.currentUser?.uidScreenshotUrl && (
+                                                                <span className="text-xs text-orange-500 mt-1 block">Click or drag to change screenshot</span>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex flex-col items-center py-4">
+                                                            <UploadIcon className="w-8 h-8 text-gray-400 mb-2" />
+                                                            <span className="text-sm text-gray-400">Upload UID Screenshot</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {uidSubmitError && (
+                                            <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-lg text-sm flex items-center space-x-2">
+                                                <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                <span>{uidSubmitError}</span>
+                                            </div>
+                                        )}
+
+                                        {uidSubmitStatus === 'success' && (
+                                            <div className="bg-green-500/10 border border-green-500/30 text-green-400 p-3 rounded-lg text-sm flex items-center space-x-2">
+                                                <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                <span>✓ Verification request submitted successfully for {selectedExchange}!</span>
+                                            </div>
+                                        )}
+
+                                        {!isPendingExchangeUid && (
+                                            <button 
+                                                onClick={handleApplyUidVerification}
+                                                disabled={uidSubmitStatus === 'submitting'}
+                                                className="w-full py-4 bg-orange-600 hover:bg-orange-500 text-white font-bold rounded-lg shadow-lg shadow-orange-600/20 transition-all mt-2 disabled:opacity-50"
+                                            >
+                                                {uidSubmitStatus === 'submitting' ? 'Submitting...' : 'Submit UID for Verification'}
+                                            </button>
+                                        )}
                                     </div>
                                 )}
-
-                                <button 
-                                    onClick={handleWithdrawClick}
-                                    className="w-full py-4 bg-orange-600 hover:bg-orange-500 text-white font-bold rounded-lg shadow-lg shadow-orange-600/20 transition-all mt-2"
-                                >
-                                    Review Withdrawal
-                                </button>
                             </div>
                         </div>
                     )}

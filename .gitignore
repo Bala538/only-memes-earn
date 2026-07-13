@@ -23,3 +23,9 @@ push-to-github.ts
 *.njsproj
 *.sln
 *.sw?
+
+# Secrets and private config
+temp-sa.json
+.env.production
+.git_old/
+git-log.txt

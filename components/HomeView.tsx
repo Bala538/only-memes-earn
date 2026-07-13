@@ -8,6 +8,8 @@ import ExchangeIcon from './icons/ExchangeIcon';
 import TokenIcon from './icons/TokenIcon';
 import BabyDogeIcon from './icons/BabyDogeIcon';
 
+import { openSafeLink } from '../utils/urlUtils';
+
 const TaskItem: React.FC<{ icon: React.ReactNode, title: string, reward: number, token: Token, tokenName: string, endTime?: string, limit?: number, claimCount?: number, onClick: () => void }> = ({ icon, title, reward, token, tokenName, endTime, limit, claimCount, onClick }) => (
     <div onClick={onClick} className="flex flex-col p-3 bg-gray-50 dark:bg-gray-800/50 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-transparent hover:border-gray-300 dark:hover:border-gray-700">
         <div className="flex items-center justify-between">
@@ -64,7 +66,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onVideoSelect, setActiveTab }) => {
 
     const handleBannerClick = (linkUrl?: string) => {
         if (linkUrl) {
-            window.open(linkUrl, '_blank', 'noopener,noreferrer');
+            openSafeLink(linkUrl);
         }
     };
     

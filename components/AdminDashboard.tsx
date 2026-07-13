@@ -4,7 +4,6 @@ import AdminTabs, { AdminTab } from './admin/AdminTabs';
 import WithdrawalManager from './admin/WithdrawalManager';
 import YouTubeTaskManager from './admin/YouTubeTaskManager';
 import ProofVerifier from './admin/ProofVerifier';
-import TelegramTaskManager from './admin/TelegramTaskManager';
 import FacebookTaskManager from './admin/FacebookTaskManager';
 import InstagramTaskManager from './admin/InstagramTaskManager';
 import TwitterTaskManager from './admin/TwitterTaskManager';
@@ -22,11 +21,11 @@ import Dashboard from './admin/Dashboard';
 import UserManager from './admin/UserManager';
 import AuthSettingsManager from './admin/AuthSettingsManager';
 import AdminPriceControl from './AdminPriceControl';
-import AdSettingsManager from './admin/AdSettingsManager';
 import MarketManager from './admin/MarketManager';
+import VerificationQueue from './admin/VerificationQueue';
+import ActivityLogs from './admin/ActivityLogs';
 
 import { YouTubeIcon } from './icons/YouTubeIcon';
-import TelegramIcon from './icons/TelegramIcon';
 import FacebookIcon from './icons/FacebookIcon';
 import InstagramIcon from './icons/InstagramIcon';
 import TwitterIcon from './icons/TwitterIcon';
@@ -38,7 +37,6 @@ const AdminDashboard: React.FC = () => {
 
     const taskTypes = [
         { id: 'youtube', label: 'YouTube', icon: <YouTubeIcon className="w-5 h-5 text-red-500" /> },
-        { id: 'telegram', label: 'Telegram', icon: <TelegramIcon className="w-5 h-5 text-blue-400" /> },
         { id: 'facebook', label: 'Facebook', icon: <FacebookIcon className="w-5 h-5 text-blue-600" /> },
         { id: 'instagram', label: 'Instagram', icon: <InstagramIcon className="w-5 h-5 text-pink-500" /> },
         { id: 'twitter', label: 'Twitter', icon: <TwitterIcon className="w-5 h-5 text-blue-400" /> },
@@ -62,12 +60,14 @@ const AdminDashboard: React.FC = () => {
                         <AdminPriceControl />
                     </div>
                 );
-            case 'ads':
-                return <AdSettingsManager />;
             case 'users':
                 return <UserManager />;
             case 'proofs':
                 return <ProofVerifier />;
+            case 'verification-queue':
+                return <VerificationQueue />;
+            case 'logs':
+                return <ActivityLogs />;
             case 'withdrawals':
                 return <WithdrawalManager />;
             case 'deposits':
@@ -86,8 +86,6 @@ const AdminDashboard: React.FC = () => {
                 return <PromoCodeManager />;
             case 'youtube':
                 return <YouTubeTaskManager />;
-            case 'telegram':
-                return <TelegramTaskManager />;
             case 'facebook':
                 return <FacebookTaskManager />;
             case 'instagram':

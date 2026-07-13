@@ -184,17 +184,19 @@ const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({ video, onBack }) => {
                 setUploadProgress(100);
             }
 
+            const isAutoApprove = isTimerOnly || 
+                (needsCode && video.correctCode && code.trim().toLowerCase() === video.correctCode.trim().toLowerCase());
+            const statusToSubmit = isAutoApprove ? 'approved' : 'pending';
+
             const taskType = video.taskType || 'youtube';
             if (taskType === 'video') {
-                await submitVideoProof(video.id, video.title, proofUrl, reward, video.rewardToken, code);
+                await submitVideoProof(video.id, video.title, proofUrl, reward, video.rewardToken, code, statusToSubmit);
             } else {
-                await submitYouTubeProof(video.id, video.title, proofUrl, reward, video.rewardToken, code);
+                await submitYouTubeProof(video.id, video.title, proofUrl, reward, video.rewardToken, code, statusToSubmit);
             }
 
-            // If it's a timer task (or no specific method), we also need to trigger the claim
-            // If it was a code task, submitYouTubeProof handles the claim if code matches
-            if (isTimerOnly) {
-                await claimTaskReward(video.id, taskType, true);
+            if (isAutoApprove) {
+                await claimTaskReward(video.id, taskType, reward, video.rewardToken, video.title);
             }
             
             onBack();
@@ -216,7 +218,9 @@ const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({ video, onBack }) => {
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" onClick={(e) => { e.stopPropagation(); setShowConfirmModal(false); }}>
                     <div className="bg-white dark:bg-[#1c1c1e] w-full max-w-sm rounded-2xl p-6 shadow-2xl border border-gray-200 dark:border-gray-700" onClick={e => e.stopPropagation()}>
                         <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Confirm Claim</h3>
-                        <p className="text-gray-500 dark:text-gray-400 mb-6 text-sm">Are you sure you want to submit your proof and claim this reward?</p>
+                        <p className="text-gray-500 dark:text-gray-400 mb-6 text-sm">
+                            {(needsScreenshot || needsCode) ? "Are you sure you want to submit your proof and claim this reward?" : "Are you sure you want to claim this reward?"}
+                        </p>
                         <div className="flex gap-3">
                             <button onClick={() => setShowConfirmModal(false)} className="flex-1 py-3 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white font-bold rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition">Cancel</button>
                             <button onClick={handleClaim} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-500 transition">Confirm</button>

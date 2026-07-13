@@ -13,11 +13,13 @@ export default defineConfig(({ mode }) => {
       plugins: [
         react(),
         VitePWA({
+          strategies: 'injectManifest',
+          srcDir: 'src',
+          filename: 'sw.ts',
           registerType: 'autoUpdate',
           includeAssets: ['/icons/icon-192x192.png', '/icons/icon-512x512.png'],
-          workbox: {
-            maximumFileSizeToCacheInBytes: 3000000, // 3MB
-            mode: 'development', // Disables Terser minification in the Service Worker compilation to avoid Out Of Memory crashes on Termux
+          injectManifest: {
+            maximumFileSizeToCacheInBytes: 3000000,
           },
           manifest: {
             name: 'Only Memes Earn',

@@ -5,7 +5,6 @@ import { UserData, Proof } from '../../types';
 import CheckCircleIcon from '../icons/CheckCircleIcon';
 import VideoIcon from '../icons/VideoIcon';
 import { YouTubeIcon } from '../icons/YouTubeIcon';
-import TelegramIcon from '../icons/TelegramIcon';
 import FacebookIcon from '../icons/FacebookIcon';
 import InstagramIcon from '../icons/InstagramIcon';
 import TwitterIcon from '../icons/TwitterIcon';
@@ -49,7 +48,6 @@ const TaskTypeIcon: React.FC<{ type: AggregatedProof['taskType'] }> = ({ type })
     switch (type) {
         case 'video': return <VideoIcon className="w-5 h-5 text-gray-400" title="Video Task" />;
         case 'youtube': return <YouTubeIcon className="w-5 h-5 text-red-500" title="YouTube Task"/>;
-        case 'telegram': return <TelegramIcon className="w-5 h-5 text-blue-400" title="Telegram Task"/>;
         case 'facebook': return <FacebookIcon className="w-5 h-5" title="Facebook Task"/>;
         case 'instagram': return <InstagramIcon className="w-5 h-5" title="Instagram Task"/>;
         case 'twitter': return <TwitterIcon className="w-5 h-5" title="Twitter Task"/>;

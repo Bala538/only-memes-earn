@@ -23,7 +23,7 @@ export interface Video {
     limit?: number; 
     dailyLimit?: number;
     endTime?: string;
-    taskType?: 'video' | 'youtube' | 'telegram' | 'facebook' | 'instagram' | 'twitter' | 'tiktok' | 'app_download';
+    taskType?: 'video' | 'youtube' | 'telegram' | 'facebook' | 'instagram' | 'twitter' | 'tiktok' | 'app_download' | 'other';
     verificationMethod?: VerificationMethod;
     correctCode?: string;
     claimCount?: number;
@@ -49,7 +49,6 @@ export interface BaseSocialTask {
 }
 
 export interface YouTubeTask extends BaseSocialTask { youtubeUrl: string; }
-export interface TelegramTask extends BaseSocialTask { telegramUrl: string; }
 export interface FacebookTask extends BaseSocialTask { facebookUrl: string; }
 export interface InstagramTask extends BaseSocialTask { instagramUrl: string; }
 export interface TwitterTask extends BaseSocialTask { twitterUrl: string; }
@@ -94,7 +93,7 @@ export interface MineUpgrade {
     dependency?: { id: string; level: number; };
 }
 
-export interface Withdrawal { id: string; amount: number; recipientAddress: string; timestamp: string; status: 'pending' | 'processing' | 'completed' | 'rejected'; token: Token; method: 'email' | 'mobile' | 'uid'; exchange?: string; }
+export interface Withdrawal { id: string; amount: number; recipientAddress: string; timestamp: string; status: 'pending' | 'processing' | 'completed' | 'rejected'; token: Token; method: 'email' | 'mobile' | 'uid'; exchange?: string; gameUid?: string; uidScreenshotUrl?: string; }
 export interface Proof { proofUrl: string; codeSubmitted?: string; status: 'started' | 'pending' | 'processing' | 'approved' | 'rejected' | 'claimed'; taskTitle: string; reward: number; rewardToken: Token; submittedAt: string; startedAt?: string; approvedAt?: string; }
 export interface Transaction { id: number; type: 'Swap' | 'Earned' | 'Mining' | 'Deposit' | 'Withdraw' | 'Referral' | 'Refund'; amount: string; date: string; isPositive: boolean; token?: string; }
 
@@ -131,6 +130,7 @@ export interface AppNotification {
 }
 
 export interface UserData {
+    docId?: string;
     uid?: string;
     email: string;
     displayName?: string;
@@ -139,10 +139,18 @@ export interface UserData {
     emailVerified: boolean;
     isBlocked?: boolean;
     lastActive?: string;
+    gameUid?: string;
+    uidScreenshotUrl?: string;
+    isUidVerified?: boolean;
+    exchangeUids?: Record<string, string>;
+    exchangeScreenshotUrls?: Record<string, string>;
+    pendingExchange?: string;
+    pendingExchangeUids?: Record<string, string>;
+    pendingExchangeScreenshots?: Record<string, string>;
+    rejectedExchangeUids?: Record<string, boolean>;
     balance: Record<Token, number>;
     videoProofs: Record<string, Proof>;
     youtubeTaskProofs: Record<string, Proof>;
-    telegramTaskProofs: Record<string, Proof>;
     facebookTaskProofs: Record<string, Proof>;
     instagramTaskProofs: Record<string, Proof>;
     twitterTaskProofs: Record<string, Proof>;
@@ -151,6 +159,7 @@ export interface UserData {
     otherTaskProofs: Record<string, Proof>;
     depositProofs: Record<string, Proof>;
     withdrawals: Withdrawal[];
+
     referralCode: string;
     referredByEmail?: string;
     tapGameData?: TapGameData;
@@ -253,7 +262,6 @@ export interface AppState {
     banners: Banner[];
     promoCodes: PromoCode[];
     youtubeTasks: YouTubeTask[];
-    telegramTasks: TelegramTask[];
     facebookTasks: FacebookTask[];
     instagramTasks: InstagramTask[];
     twitterTasks: TwitterTask[];
@@ -274,6 +282,16 @@ export interface AppState {
     adModal: AdModalState;
     ushaPrice: number;
     loading: boolean;
+    exchanges: { name: string; enabled: boolean }[];
+    adminLogs: AdminLog[];
+}
+
+export interface AdminLog {
+    id: string;
+    adminEmail: string;
+    action: string;
+    details: string;
+    timestamp: string;
 }
 
 export type AppAction =
@@ -282,7 +300,6 @@ export type AppAction =
     | { type: 'SET_VIDEOS'; payload: Video[] }
     | { type: 'SET_GAMES'; payload: Game[] }
     | { type: 'SET_YOUTUBE_TASKS'; payload: YouTubeTask[] }
-    | { type: 'SET_TELEGRAM_TASKS'; payload: TelegramTask[] }
     | { type: 'SET_FACEBOOK_TASKS'; payload: FacebookTask[] }
     | { type: 'SET_INSTAGRAM_TASKS'; payload: InstagramTask[] }
     | { type: 'SET_TWITTER_TASKS'; payload: TwitterTask[] }
@@ -302,6 +319,7 @@ export type AppAction =
     | { type: 'SET_MINE_UPGRADES'; payload: MineUpgrade[] }
     | { type: 'SET_DAILY_SCHEDULE'; payload: Record<string, DailyConfig> }
     | { type: 'SET_ALL_USERS', payload: UserData[] }
+    | { type: 'SET_ADMIN_LOGS', payload: AdminLog[] }
     | { type: 'TOGGLE_VIEW' }
     | { type: 'SHOW_IMAGE_PREVIEW'; payload: string }
     | { type: 'HIDE_IMAGE_PREVIEW' }
@@ -314,4 +332,5 @@ export type AppAction =
     | { type: 'UPDATE_MARKET_PRICE'; payload: { pair: string; price: number } }
     | { type: 'SET_MARKETS'; payload: MarketPair[] }
     | { type: 'SET_USHA_PRICE'; payload: number }
-    | { type: 'SET_LOADING', payload: boolean };
+    | { type: 'SET_LOADING', payload: boolean }
+    | { type: 'SET_EXCHANGES'; payload: { name: string; enabled: boolean }[] };

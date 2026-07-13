@@ -46,6 +46,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
         onlineUsers: 0,
         pendingProofs: 0,
         pendingWithdrawals: 0,
+        pendingUidVerifications: 0,
         totalEarnings: 0,
         totalPayouts: 0
     });
@@ -55,6 +56,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
         
         let pendingProofs = 0;
         let pendingWithdrawals = 0;
+        let pendingUidVerifications = 0;
         let onlineUsers = 0;
         let totalEarnings = 0;
         let totalPayouts = 0;
@@ -67,6 +69,14 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
                 if (diff < 5 * 60 * 1000) { // 5 minutes
                     onlineUsers++;
                 }
+            }
+
+            // Count pending UID verifications
+            const recordPendingsCount = user.pendingExchangeUids ? Object.keys(user.pendingExchangeUids).length : 0;
+            if (recordPendingsCount > 0) {
+                pendingUidVerifications += recordPendingsCount;
+            } else if (user.gameUid && !user.isUidVerified) {
+                pendingUidVerifications++;
             }
 
             // Calculate Earnings & Payouts (USHA only for simplicity or convert all?)
@@ -116,6 +126,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
             onlineUsers,
             pendingProofs,
             pendingWithdrawals,
+            pendingUidVerifications,
             totalEarnings,
             totalPayouts
         });
@@ -154,6 +165,17 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
                     icon={<HistoryIcon className="w-6 h-6 text-red-400" />} 
                     color="border-red-500"
                     onClick={() => setActiveTab('withdrawals')}
+                />
+                <StatCard 
+                    title="Pending UID Verifications" 
+                    value={stats.pendingUidVerifications} 
+                    icon={
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-purple-400">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                        </svg>
+                    } 
+                    color="border-purple-600"
+                    onClick={() => setActiveTab('verification-queue')}
                 />
                  <StatCard 
                     title={`Total User Earnings (${state.tokenConfigs['USHA']?.name || 'USHA'})`} 

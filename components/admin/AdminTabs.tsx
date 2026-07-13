@@ -3,7 +3,6 @@ import React from 'react';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import CheckCircleIcon from '../icons/CheckCircleIcon';
 import HistoryIcon from '../icons/HistoryIcon';
-import TelegramIcon from '../icons/TelegramIcon';
 import { YouTubeIcon } from '../icons/YouTubeIcon';
 import FacebookIcon from '../icons/FacebookIcon';
 import InstagramIcon from '../icons/InstagramIcon';
@@ -23,7 +22,7 @@ import VideoIcon from '../icons/VideoIcon';
 import ExchangeIcon from '../icons/ExchangeIcon';
 
 
-export type AdminTab = 'dashboard' | 'markets' | 'ads' | 'users' | 'proofs' | 'withdrawals' | 'deposits' | 'tokens' | 'games' | 'mine' | 'banners' | 'promo' | 'airdrop' | 'settings' | 'youtube' | 'telegram' | 'facebook' | 'instagram' | 'twitter' | 'tiktok' | 'app_download' | 'other';
+export type AdminTab = 'dashboard' | 'markets' | 'users' | 'proofs' | 'withdrawals' | 'deposits' | 'tokens' | 'games' | 'mine' | 'banners' | 'promo' | 'airdrop' | 'settings' | 'youtube' | 'telegram' | 'facebook' | 'instagram' | 'twitter' | 'tiktok' | 'app_download' | 'other' | 'verification-queue' | 'logs';
 
 interface AdminTabsProps {
     activeTab: AdminTab;
@@ -98,13 +97,6 @@ const AdminTabs: React.FC<AdminTabsProps> = ({ activeTab, setActiveTab }) => {
                     tooltip="Manage YouTube subscription tasks"
                 />
                 <TabItem 
-                    label="Telegram" 
-                    icon={<TelegramIcon className="w-5 h-5"/>} 
-                    isActive={activeTab === 'telegram'} 
-                    onClick={() => setActiveTab('telegram')} 
-                    tooltip="Manage Telegram channel join tasks"
-                />
-                <TabItem 
                     label="Facebook" 
                     icon={<FacebookIcon className="w-5 h-5"/>} 
                     isActive={activeTab === 'facebook'} 
@@ -145,15 +137,6 @@ const AdminTabs: React.FC<AdminTabsProps> = ({ activeTab, setActiveTab }) => {
                     isActive={activeTab === 'other'} 
                     onClick={() => setActiveTab('other')} 
                     tooltip="Manage other tasks"
-                />
-                
-                <TabItem 
-                    label="AdMob Monetize" 
-                    isSpecial={true}
-                    icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-blue-500 animate-pulse"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>} 
-                    isActive={activeTab === 'ads'} 
-                    onClick={() => setActiveTab('ads')} 
-                    tooltip="Configure AdMob settings and ad units"
                 />
                 
                 <TabItem 
@@ -200,6 +183,17 @@ const AdminTabs: React.FC<AdminTabsProps> = ({ activeTab, setActiveTab }) => {
                     tooltip="Review and approve task proofs"
                 />
                 <TabItem 
+                    label="Verification Queue" 
+                    icon={
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                        </svg>
+                    } 
+                    isActive={activeTab === 'verification-queue'} 
+                    onClick={() => setActiveTab('verification-queue')} 
+                    tooltip="Verify and approve user exchange UIDs and screenshots"
+                />
+                <TabItem 
                     label="Withdrawals" 
                     icon={<HistoryIcon className="w-5 h-5"/>} 
                     isActive={activeTab === 'withdrawals'} 
@@ -219,6 +213,17 @@ const AdminTabs: React.FC<AdminTabsProps> = ({ activeTab, setActiveTab }) => {
                     isActive={activeTab === 'tokens'} 
                     onClick={() => setActiveTab('tokens')} 
                     tooltip="Manage supported cryptocurrencies"
+                />
+                <TabItem 
+                    label="Activity Logs" 
+                    icon={
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.03 0 1.9.693 2.166 1.638m-7.377 0A49.535 49.535 0 0112 4.022c.29.007.58.019.87.036m-9.75 6.12v7.909a2.25 2.25 0 002.25 2.25h1.5" />
+                        </svg>
+                    } 
+                    isActive={activeTab === 'logs'} 
+                    onClick={() => setActiveTab('logs')} 
+                    tooltip="Track all administrator action logs"
                 />
                 <TabItem 
                     label="Settings" 

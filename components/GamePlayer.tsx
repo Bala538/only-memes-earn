@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useRef, useContext, useCallback, useMemo } from 'react';
 import { Game, MineUpgrade, TapGameData, Transaction } from '../types';
 import { AppContext } from '../context/AppContext';
+import confetti from 'canvas-confetti';
+import { triggerHapticFeedback } from '../utils/telegramUtils';
 import TokenIcon from './icons/TokenIcon';
 import ExchangeIcon from './icons/ExchangeIcon';
 import PickaxeIcon from './icons/PickaxeIcon';
@@ -238,8 +240,14 @@ export function GamePlayer({ game, onBack }: GamePlayerProps) {
     }, [pph, maxEnergy, saveGameData, today]);
 
     const handleTap = (e: React.PointerEvent) => {
-        if (energy < 1) { setEnergyError(true); setTimeout(() => setEnergyError(false), 300); return; }
+        if (energy < 1) { 
+            setEnergyError(true); 
+            triggerHapticFeedback('error');
+            setTimeout(() => setEnergyError(false), 300); 
+            return; 
+        }
         if (navigator.vibrate) navigator.vibrate(10);
+        triggerHapticFeedback('light');
         setIsTapping(true); setTimeout(() => setIsTapping(false), 100);
         const rect = e.currentTarget.getBoundingClientRect();
         setClickEffects(p => [...p, { id: Date.now() + Math.random(), x: e.clientX - rect.left, y: e.clientY - rect.top, val: 1 }]);
@@ -257,18 +265,20 @@ export function GamePlayer({ game, onBack }: GamePlayerProps) {
         const targetMorse = charToMorse(targetWord[cipherSolvedIndex] || '');
         
         if (navigator.vibrate) navigator.vibrate(duration < 200 ? 5 : 40);
+        triggerHapticFeedback('light');
         
         if (targetMorse === input) {
             setCipherSolvedIndex(i => i + 1);
             setCurrentMorseInput('');
             if (cipherSolvedIndex + 1 >= targetWord.length) {
-                setTimeout(() => { setIsCipherCompleted(true); setShowCipherSuccessModal(true); if(navigator.vibrate) navigator.vibrate([100,50,100]); }, 300);
+                setTimeout(() => { setIsCipherCompleted(true); setShowCipherSuccessModal(true); if(navigator.vibrate) navigator.vibrate([100,50,100]); triggerHapticFeedback('success'); confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, zIndex: 9999 }); }, 300);
             }
         } else if (targetMorse.startsWith(input)) {
             setCurrentMorseInput(input);
         } else {
             setCurrentMorseInput(input);
             if(navigator.vibrate) navigator.vibrate([50,50,50]);
+            triggerHapticFeedback('error');
             setTimeout(() => { setCurrentMorseInput(''); setCipherSolvedIndex(0); }, 500);
         }
     };
@@ -277,7 +287,12 @@ export function GamePlayer({ game, onBack }: GamePlayerProps) {
         const lvl = mineLevel[upgrade.id] || 0;
         const cost = Math.floor(upgrade.baseCost * Math.pow(upgrade.costMultiplier || 1.15, lvl));
         if (score >= cost) {
-            if (upgrade.dependency && (mineLevel[upgrade.dependency.id] || 0) < upgrade.dependency.level) { alert(`Requires ${mineUpgrades.find(u=>u.id===upgrade.dependency!.id)?.name} lvl ${upgrade.dependency.level}`); return; }
+            if (upgrade.dependency && (mineLevel[upgrade.dependency.id] || 0) < upgrade.dependency.level) { 
+                triggerHapticFeedback('error');
+                alert(`Requires ${mineUpgrades.find(u=>u.id===upgrade.dependency!.id)?.name} lvl ${upgrade.dependency.level}`); 
+                return; 
+            }
+            triggerHapticFeedback('success');
             setGameData(p => {
                 const combo = p.dailyComboFound || [];
                 const found = dailyConfig?.combo.includes(upgrade.id) && !combo.includes(upgrade.id);
@@ -285,6 +300,8 @@ export function GamePlayer({ game, onBack }: GamePlayerProps) {
                 const newTx: Transaction = { id: Date.now(), type: 'Mining', amount: cost.toLocaleString(), date: new Date().toISOString(), isPositive: false };
                 return { ...p, score: p.score - cost, mineLevel: { ...p.mineLevel, [upgrade.id]: lvl + 1 }, dailyComboFound: found ? [...combo, upgrade.id] : combo, history: [...(p.history || []), newTx] };
             });
+        } else {
+            triggerHapticFeedback('error');
         }
     };
 
@@ -306,6 +323,12 @@ export function GamePlayer({ game, onBack }: GamePlayerProps) {
             const newTx: Transaction = { id: Date.now(), type: 'Swap', amount: amount.toLocaleString(), date: new Date().toISOString(), isPositive: false };
             setGameData(p => ({ ...p, score: p.score - amount, history: [...(p.history || []), newTx] }));
             addBalance(amount, rewardToken);
+            confetti({
+                particleCount: 150,
+                spread: 80,
+                origin: { y: 0.6 },
+                zIndex: 9999
+            });
             setSwapStatus('success'); 
             setSwapScoreAmount('');
             setSwapMessage('Success!');
@@ -437,6 +460,7 @@ export function GamePlayer({ game, onBack }: GamePlayerProps) {
                                 const newTx: Transaction = { id: Date.now(), type: 'Earned', amount: comboReward.toLocaleString(), date: new Date().toISOString(), isPositive: true };
                                 setGameData(p=>({...p,score:p.score+comboReward,lastComboClaim:new Date().toISOString(), history: [...(p.history || []), newTx]})); 
                                 setShowComboSuccessModal(true);
+                                confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, zIndex: 9999 });
                             }} className="w-full mt-4 bg-yellow-500 text-black font-bold py-2 rounded-xl">Claim {formatNumber(comboReward)}</button>}
                         </div>
                         <div className="flex overflow-x-auto gap-2 pb-2 mb-2 scrollbar-hide">

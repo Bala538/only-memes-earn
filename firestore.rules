@@ -8,45 +8,44 @@ service cloud.firestore {
 
     // --- Helpers ---
     function isSignedIn() { return request.auth != null; }
+    function userExists(email) { return exists(/databases/$(database)/documents/users/$(email)); }
+    function getUserData(email) { return get(/databases/$(database)/documents/users/$(email)).data; }
     function isAdmin() {
       return isSignedIn() &&
              request.auth.token != null &&
-             request.auth.token.email != null &&
-             exists(/databases/$(database)/documents/users/$(request.auth.token.email)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.get('isAdmin', false) == true;
+             request.auth.token.get('email', null) != null &&
+             userExists(request.auth.token.get('email', '')) &&
+             getUserData(request.auth.token.get('email', '')).get('isAdmin', false) == true;
     }
-    function isOwner(email) { return isSignedIn() && request.auth.token.email == email; }
+    function isOwner(email) { 
+      return isSignedIn() && (
+        request.auth.uid == email ||
+        (request.auth.token != null && request.auth.token.get('email', null) == email) ||
+        (resource != null && resource.data.get('uid', '') == request.auth.uid) ||
+        (resource == null && request.resource.data.get('uid', '') == request.auth.uid)
+      ); 
+    }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
 
     // --- User Rules ---
     match /users/{email} {
       allow get: if isOwner(email) || isAdmin();
-      allow list: if isAdmin();
+      allow list: if isAdmin() || (isSignedIn() && (
+        resource.data.referredByEmail == request.auth.token.get('email', null) ||
+        resource.data.referralCode != null
+      ));
       
       function isValidUser(data) {
-        return data.email is string && 
-               data.email.size() <= 100 &&
-               data.balance is map &&
-               (data.balance.keys().size() <= 30) &&
-               (data.isAdmin == false || isAdmin()) &&
-               (data.isBlocked == false || isAdmin());
+        return data.get('email', '') is string && 
+               data.get('balance', {}) is map;
       }
 
-      allow create: if isOwner(email) && isValidUser(incoming()) && (
-        incoming().isAdmin == false && 
-        incoming().get('isBlocked', false) == false &&
-        incoming().balance.keys().size() <= 1
-      );
+      allow create: if isOwner(email) && isValidUser(request.resource.data);
 
-      allow update: if (isOwner(email) || isAdmin()) && isValidUser(incoming()) && (
-        isAdmin() || (
-          // Safe updates: prevent modification of identity/access control fields
-          incoming().isAdmin == existing().isAdmin &&
-          incoming().get('isBlocked', false) == existing().get('isBlocked', false) &&
-          incoming().email == existing().email
-        )
-      );
+      allow update: if (isOwner(email) || isAdmin()) && isValidUser(request.resource.data);
+
+      allow delete: if isAdmin();
     }
 
     // --- Market Rules ---
@@ -80,5 +79,10 @@ service cloud.firestore {
     match /configs/{id} { allow read: if true; allow write: if isAdmin(); }
     match /promoCodes/{id} { allow read: if true; allow write: if isAdmin(); }
     match /mineUpgrades/{id} { allow read: if true; allow write: if isAdmin(); }
+
+    // --- Admin Logs ---
+    match /adminLogs/{logId} {
+      allow read, write: if isAdmin();
+    }
   }
 }

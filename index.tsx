@@ -7,6 +7,16 @@ import { registerSW } from 'virtual:pwa-register';
 // Register service worker for offline support
 registerSW({ immediate: true });
 
+// Initialize Telegram WebApp if available
+if (typeof window !== 'undefined' && (window as any).Telegram?.WebApp) {
+    try {
+        (window as any).Telegram.WebApp.ready();
+        (window as any).Telegram.WebApp.expand();
+    } catch (e) {
+        console.error("Telegram WebApp initialization error:", e);
+    }
+}
+
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");

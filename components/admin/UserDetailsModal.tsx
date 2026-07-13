@@ -19,7 +19,7 @@ interface UserDetailsModalProps {
 const formatNumber = (num: number) => num.toLocaleString();
 
 const UserDetailsModal: React.FC<UserDetailsModalProps> = ({ isOpen, onClose, user }) => {
-    const { state } = useContext(AppContext);
+    const { state, adminReverifyUserUid } = useContext(AppContext);
     if (!isOpen || !user) return null;
 
     const balances = user.balance || {};
@@ -142,6 +142,69 @@ const UserDetailsModal: React.FC<UserDetailsModalProps> = ({ isOpen, onClose, us
                                         <div className="flex flex-col pt-1">
                                             <span className="text-gray-500 text-xs mb-1">Airdrop Address:</span>
                                             <span className="text-indigo-300 font-mono text-xs break-all bg-indigo-900/20 p-2 rounded border border-indigo-500/20">{user.airdropAddress}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Verified Exchange UIDs */}
+                            <div className="bg-gray-100 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-200 dark:border-gray-700">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                    </svg>
+                                    Exchange UID Verifications
+                                </h3>
+                                <div className="space-y-2">
+                                    {user.exchangeUids && Object.keys(user.exchangeUids).length > 0 ? (
+                                        Object.entries(user.exchangeUids).map(([exchange, uid]) => (
+                                            <div key={exchange} className="flex justify-between items-center bg-green-500/5 px-3 py-2 rounded border border-green-500/10 text-xs">
+                                                <span className="font-bold text-gray-900 dark:text-white">{exchange}</span>
+                                                <span className="font-mono font-bold text-green-600 dark:text-green-400 bg-green-500/10 px-2 py-0.5 rounded">{uid}</span>
+                                            </div>
+                                        ))
+                                    ) : user.isUidVerified && user.gameUid ? (
+                                        <div className="flex justify-between items-center bg-green-500/5 px-3 py-2 rounded border border-green-500/10 text-xs">
+                                            <span className="font-bold text-gray-900 dark:text-white">Default Exchange</span>
+                                            <span className="font-mono font-bold text-green-600 dark:text-green-400 bg-green-500/10 px-2 py-0.5 rounded">{user.gameUid}</span>
+                                        </div>
+                                    ) : (
+                                        <p className="text-gray-500 text-xs italic p-2 text-center">No verified exchange UIDs.</p>
+                                    )}
+
+                                    {user.pendingExchangeUids && Object.keys(user.pendingExchangeUids).length > 0 ? (
+                                        Object.entries(user.pendingExchangeUids).map(([exchange, uid]) => (
+                                            <div key={exchange} className="flex justify-between items-center bg-amber-500/5 px-3 py-2 rounded border border-amber-500/10 text-xs mt-2">
+                                                <span className="font-bold text-gray-900 dark:text-white">⏳ Pending ({exchange})</span>
+                                                <span className="font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">{uid}</span>
+                                            </div>
+                                        ))
+                                    ) : user.gameUid && !user.isUidVerified ? (
+                                        <div className="flex justify-between items-center bg-amber-500/5 px-3 py-2 rounded border border-amber-500/10 text-xs mt-2">
+                                            <span className="font-bold text-gray-900 dark:text-white">⏳ Pending ({user.pendingExchange || 'UID'})</span>
+                                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">{user.gameUid}</span>
+                                        </div>
+                                    ) : null}
+
+                                    {(!!user.isUidVerified || (user.exchangeUids && Object.keys(user.exchangeUids).length > 0)) && (
+                                        <div className="pt-3">
+                                            <button
+                                                onClick={async () => {
+                                                    const confirmReverify = window.confirm(`Are you sure you want to request UID re-verification for ${user.email}? This will clear all their currently verified UIDs and screenshots, forcing them to re-submit.`);
+                                                    if (!confirmReverify) return;
+                                                    try {
+                                                        await adminReverifyUserUid(user.docId || user.email);
+                                                        alert("Successfully requested UID re-verification.");
+                                                        onClose();
+                                                    } catch (err) {
+                                                        console.error("Failed to request re-verification:", err);
+                                                        alert("Failed to reset verification.");
+                                                    }
+                                                }}
+                                                className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-colors border border-amber-500/20 shadow-md cursor-pointer"
+                                            >
+                                                ⚠️ Request UID Re-verification
+                                            </button>
                                         </div>
                                     )}
                                 </div>

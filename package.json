@@ -5,13 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "cap:sync": "vite build && cap sync",
     "cap:android": "cap open android",
     "cap:ios": "cap open ios",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "start": "tsx server.ts"
+    "start": "node dist/server.cjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",
@@ -20,7 +20,9 @@
     "@capacitor/core": "^8.3.1",
     "@capacitor/ios": "^8.2.0",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@types/web-push": "^3.6.4",
     "axios": "^1.13.6",
+    "canvas-confetti": "^1.9.4",
     "express": "^5.2.1",
     "firebase": "10.8.0",
     "firebase-admin": "^13.7.0",
@@ -35,22 +37,27 @@
     "recharts": "^3.7.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vite-plugin-pwa": "^1.2.0"
+    "vite-plugin-pwa": "^1.2.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.3.1",
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "@types/canvas-confetti": "^1.9.0",
     "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^7.0.11",
     "@typescript-eslint/eslint-plugin": "^8.56.0",
     "@typescript-eslint/parser": "^8.56.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "esbuild": "^0.28.0",
     "eslint": "^9.0.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.0",
     "firebase-tools": "^13.8.3",
     "jimp": "^1.6.1",
+    "ts-node": "^10.9.2",
     "typescript-eslint": "^8.57.2",
     "vite": "^6.2.0"
   }

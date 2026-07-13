@@ -5,6 +5,7 @@ import GameControllerIcon from './icons/GameControllerIcon';
 import TokenIcon from './icons/TokenIcon';
 import PlayCircleIcon from './icons/PlayCircleIcon';
 import { Game } from '../types';
+import { triggerHapticFeedback } from '../utils/telegramUtils';
 
 const DEFAULT_GAME: Game = {
     id: 'official-tap-game',
@@ -38,7 +39,10 @@ const GamesView: React.FC = () => {
                 {displayGames.map(game => (
                     <div 
                         key={game.id} 
-                        onClick={() => playGame(game)}
+                        onClick={() => {
+                            triggerHapticFeedback('light');
+                            playGame(game);
+                        }}
                         className="bg-white dark:bg-[#161B22] rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden cursor-pointer hover:shadow-md transition-all group relative"
                     >
                         {game.id === 'official-tap-game' && (

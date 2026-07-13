@@ -8,13 +8,18 @@ service cloud.firestore {
 
     // --- Helpers ---
     function isSignedIn() { return request.auth != null; }
-    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function userExists(email) { return exists(/databases/$(database)/documents/users/$(email)); }
     function getUserData(email) { return get(/databases/$(database)/documents/users/$(email)).data; }
-    function isAdmin() { return isSignedIn() && getUserData(request.auth.token.email).isAdmin == true; }
+    function isAdmin() {
+      return isSignedIn() &&
+             request.auth.token != null &&
+             request.auth.token.email != null &&
+             userExists(request.auth.token.email) &&
+             getUserData(request.auth.token.email).get('isAdmin', false) == true;
+    }
     function isOwner(email) { return isSignedIn() && request.auth.token.email == email; }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
-    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
 
     // --- User Rules ---
     match /users/{email} {
@@ -25,46 +30,44 @@ service cloud.firestore {
         return data.email is string && 
                data.email.size() <= 100 &&
                data.balance is map &&
-               (data.balance.keys().size() <= 20) &&
+               (data.balance.keys().size() <= 30) &&
                (data.isAdmin == false || isAdmin()) &&
                (data.isBlocked == false || isAdmin());
       }
 
       allow create: if isOwner(email) && isValidUser(incoming()) && (
         incoming().isAdmin == false && 
-        incoming().balance.keys().size() == 0
+        incoming().get('isBlocked', false) == false &&
+        incoming().balance.keys().size() <= 1
       );
 
-      allow update: if isOwner(email) && isValidUser(incoming()) && (
-        // Action: Update profile (no balance/admin change)
-        (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'fcmToken'])) ||
-        // Action: Submit Task Proof (append to array)
-        (incoming().diff(existing()).affectedKeys().hasOnly(['taskProofs']) && 
-         incoming().taskProofs.size() > existing().get('taskProofs', []).size()) ||
-        // Action: Trade Execution (special case for balance updates)
-        // Note: Ideally this should check if the change matches an order matched in a market
-        (incoming().diff(existing()).affectedKeys().hasOnly(['balance', 'openOrders']))
-      ) || isAdmin();
+      allow update: if (isOwner(email) || isAdmin()) && isValidUser(incoming()) && (
+        isAdmin() || (
+          // Safe updates: prevent modification of identity/access control fields
+          incoming().isAdmin == existing().isAdmin &&
+          incoming().get('isBlocked', false) == existing().get('isBlocked', false) &&
+          incoming().email == existing().email
+        )
+      );
     }
 
     // --- Market Rules ---
     match /markets/{marketId} {
       allow read: if true;
-      
-      function isValidMarket(data) {
-        return data.base is string && data.quote is string &&
-               data.price is number && data.price >= 0;
-      }
-
-      allow create, delete: if isAdmin();
-      allow update: if isAdmin() || (
-        // Action: Execute Trade (Self-limiting)
-        isSignedIn() && isValidMarket(incoming()) &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['bids', 'asks', 'trades', 'price', 'candles', 'volume'])
-      );
+      allow write: if isAdmin();
     }
 
-    // --- Task Rules (Read Only for Users) ---
+    // --- Videos and Games Rules ---
+    match /videos/{videoId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /games/{gameId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // --- Task Rules ---
     match /youtubeTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
     match /telegramTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
     match /facebookTasks/{taskId} { allow read: if true; allow write: if isAdmin(); }
@@ -79,5 +82,10 @@ service cloud.firestore {
     match /configs/{id} { allow read: if true; allow write: if isAdmin(); }
     match /promoCodes/{id} { allow read: if true; allow write: if isAdmin(); }
     match /mineUpgrades/{id} { allow read: if true; allow write: if isAdmin(); }
+
+    // --- Admin Logs ---
+    match /adminLogs/{logId} {
+      allow read, write: if isAdmin();
+    }
   }
 }

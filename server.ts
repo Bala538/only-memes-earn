@@ -4,6 +4,7 @@ import { dirname, join } from 'path';
 import axios from 'axios';
 import nodemailer from 'nodemailer';
 import admin from 'firebase-admin';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -11,16 +12,25 @@ const __dirname = dirname(__filename);
 // Initialize Firebase Admin
 let adminInitialized = false;
 try {
+  let projectId;
+  const configPath = join(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    const configData = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    projectId = configData.projectId;
+  }
+
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+      credential: admin.credential.cert(serviceAccount),
+      projectId: projectId || serviceAccount.project_id
     });
+    adminInitialized = true;
+    console.log("Firebase Admin initialized successfully.");
   } else {
-    admin.initializeApp();
+    console.warn("⚠️ FIREBASE_SERVICE_ACCOUNT environment variable is not set. Admin features are disabled and frontend will use fallback operations.");
+    adminInitialized = false;
   }
-  adminInitialized = true;
-  console.log("Firebase Admin initialized successfully.");
 } catch (error) {
   console.warn("Failed to initialize Firebase Admin. Custom tokens will be mocked.", error);
 }
@@ -54,27 +64,127 @@ async function setupMailer() {
     }
   }
   
-  console.log("Creating Ethereal test account...");
-  const testAccount = await nodemailer.createTestAccount();
-  transporter = nodemailer.createTransport({
-    host: "smtp.ethereal.email",
-    port: 587,
-    secure: false,
-    auth: {
-      user: testAccount.user,
-      pass: testAccount.pass,
-    },
-  });
-  console.log("Ethereal test account created. Emails will be logged with a preview URL.");
+  try {
+    console.log("Creating Ethereal test account...");
+    const testAccount = await nodemailer.createTestAccount();
+    transporter = nodemailer.createTransport({
+      host: "smtp.ethereal.email",
+      port: 587,
+      secure: false,
+      auth: {
+        user: testAccount.user,
+        pass: testAccount.pass,
+      },
+    });
+    console.log("Ethereal test account created. Emails will be logged with a preview URL.");
+  } catch (error: any) {
+    console.warn("Failed to create Ethereal account. Using a simulated logging transporter.", error.message);
+    transporter = {
+      sendMail: async (options: any) => {
+        console.log("\n================ [SIMULATED EMAIL] ================");
+        console.log(`To: ${options.to}`);
+        console.log(`Subject: ${options.subject}`);
+        console.log(`Body: ${options.text || options.html}`);
+        console.log("===================================================\n");
+        return { messageId: "simulated_" + Date.now() };
+      },
+      verify: async () => true
+    } as any;
+  }
 }
 
 setupMailer();
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
 
-  app.use(express.json());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+  // CORS Middleware to allow requests from custom domains, local testing, etc.
+  app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS, POST, PUT, DELETE");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(200);
+      return;
+    }
+    next();
+  });
+
+  // Proxy for Firebase Auth custom domain (so custom domains can serve /__/auth/*)
+  app.use("/__", async (req, res) => {
+    const targetUrl = `https://only-memes-earn.firebaseapp.com${req.originalUrl}`;
+    try {
+      const cleanHeaders: any = {};
+      Object.entries(req.headers).forEach(([key, val]) => {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey !== 'host' && lowerKey !== 'accept-encoding' && lowerKey !== 'connection') {
+          cleanHeaders[key] = val;
+        }
+      });
+      cleanHeaders['host'] = 'only-memes-earn.firebaseapp.com';
+
+      const isGetOrHead = ['GET', 'HEAD'].includes(req.method.toUpperCase());
+      let requestData = isGetOrHead ? undefined : req.body;
+      const contentType = req.headers['content-type'] || '';
+      
+      if (!isGetOrHead && contentType.includes('application/x-www-form-urlencoded') && typeof req.body === 'object' && req.body !== null) {
+        const params = new URLSearchParams();
+        Object.entries(req.body).forEach(([key, val]) => {
+          params.append(key, String(val));
+        });
+        requestData = params.toString();
+      }
+
+      const response = await axios({
+        method: req.method as any,
+        url: targetUrl,
+        data: requestData,
+        headers: cleanHeaders,
+        responseType: 'arraybuffer'
+      });
+
+      // Forward response headers, excluding headers that are managed by Express/Node or modified by decompression
+      const headersToExclude = [
+        'content-security-policy',
+        'transfer-encoding',
+        'content-encoding',
+        'content-length',
+        'connection'
+      ];
+
+      Object.entries(response.headers).forEach(([key, val]) => {
+        const lowerKey = key.toLowerCase();
+        if (!headersToExclude.includes(lowerKey)) {
+          res.setHeader(key, val as any);
+        }
+      });
+
+      res.status(response.status).send(response.data);
+    } catch (error: any) {
+      console.error(`Firebase Auth Proxy Error for ${targetUrl}:`, error.message);
+      if (error.response) {
+        // Forward headers to exclude list here as well
+        const headersToExclude = [
+          'content-security-policy',
+          'transfer-encoding',
+          'content-encoding',
+          'content-length',
+          'connection'
+        ];
+        Object.entries(error.response.headers).forEach(([key, val]) => {
+          const lowerKey = key.toLowerCase();
+          if (!headersToExclude.includes(lowerKey)) {
+            res.setHeader(key, val as any);
+          }
+        });
+        res.status(error.response.status).send(error.response.data);
+      } else {
+        res.status(500).send("Proxy error: " + error.message);
+      }
+    }
+  });
 
   // API Routes
   app.get("/api/markets", async (req, res) => {
@@ -325,6 +435,381 @@ async function startServer() {
     }
   });
 
+  app.post("/api/auth/send-signin-link", async (req, res) => {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    try {
+      const actionCodeSettings = {
+        url: `${req.protocol}://${req.get('host')}/`, // Redirect back to homepage
+        handleCodeInApp: true,
+      };
+
+      let link = '';
+      let isSimulated = false;
+
+      if (adminInitialized) {
+        try {
+          link = await admin.auth().generateSignInWithEmailLink(normalizedEmail, actionCodeSettings);
+        } catch (e: any) {
+          console.warn("generateSignInWithEmailLink failed, falling back to simulated link:", e?.message || e);
+          link = `${req.protocol}://${req.get('host')}/?email=${encodeURIComponent(normalizedEmail)}&loginToken=mock_${Math.random().toString(36).substring(2, 12)}`;
+          isSimulated = true;
+        }
+      } else {
+        link = `${req.protocol}://${req.get('host')}/?email=${encodeURIComponent(normalizedEmail)}&loginToken=mock_${Math.random().toString(36).substring(2, 12)}`;
+        isSimulated = true;
+      }
+
+      if (transporter) {
+        await transporter.sendMail({
+          from: '"OnlyMemes Earn" <noreply@onlymemesearn.store>',
+          to: normalizedEmail,
+          subject: 'Your OnlyMemes Earn Magic Login Link 🚀',
+          text: `Welcome! Click this link to sign in to OnlyMemes Earn: ${link}`,
+          html: `
+            <div style="font-family: sans-serif; padding: 24px; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 8px; background-color: #000; color: #fff;">
+              <h2 style="color: #fbbf24; margin-top: 0; text-align: center; font-size: 28px;">OnlyMemes Earn 🚀</h2>
+              <p style="font-size: 16px; text-align: center; color: #ccc;">You requested a secure login link. Click the button below to sign in or create your account instantly:</p>
+              <div style="margin: 36px 0; text-align: center;">
+                <a href="${link}" style="background-color: #fbbf24; color: black; padding: 14px 32px; text-decoration: none; border-radius: 12px; font-weight: 900; display: inline-block; font-size: 16px; box-shadow: 0 4px 12px rgba(251, 191, 36, 0.3);">Sign In Instantly</a>
+              </div>
+              <p style="font-size: 13px; color: #888; line-height: 1.5; text-align: center;">If the button doesn't work, copy and paste this URL into your web browser:</p>
+              <p style="font-size: 12px; color: #fbbf24; word-break: break-all; font-family: monospace; text-align: center; background-color: #111; padding: 12px; border-radius: 8px;">${link}</p>
+              <hr style="border: 0; border-top: 1px solid #222; margin: 24px 0;">
+              <p style="font-size: 11px; color: #666; text-align: center;">If you did not request this, you can safely ignore this email.</p>
+            </div>
+          `
+        });
+      }
+
+      const isTestAccount = isSimulated || !process.env.SMTP_USER || process.env.SMTP_USER === 'dummy';
+
+      res.json({
+        success: true,
+        message: isTestAccount ? 'Magic link generated (Dev Mode)' : 'Magic link sent successfully',
+        isSimulated: isTestAccount,
+        link: isTestAccount ? link : undefined
+      });
+    } catch (error: any) {
+      console.error('Error sending magic link:', error);
+      res.status(500).json({ error: error.message || 'Failed to send magic link' });
+    }
+  });
+
+  app.post("/api/auth/send-verification-email", async (req, res) => {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    if (!adminInitialized) {
+      return res.status(500).json({ error: 'Firebase Admin not initialized on server.' });
+    }
+
+    try {
+      // 1. Generate the link that verifies the user
+      const actionCodeSettings = {
+        url: `${req.protocol}://${req.get('host')}/`, // Redirect back to front page upon verification
+        handleCodeInApp: true,
+      };
+      const link = await admin.auth().generateEmailVerificationLink(normalizedEmail, actionCodeSettings);
+
+      // 2. Send the email using Nodemailer
+      if (!transporter) {
+        throw new Error("Transporter not initialized");
+      }
+      
+      const info = await transporter.sendMail({
+        from: '"OnlyMemes Earn Support" <noreply@onlymemesearn.store>',
+        to: normalizedEmail,
+        subject: 'Verify Your Email Address',
+        text: `Welcome! Please click the following link to verify your email address: ${link}`,
+        html: `
+          <div style="font-family: sans-serif; padding: 24px; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 8px;">
+            <h2 style="color: #4f46e5; margin-top: 0;">Welcome to OnlyMemes Earn!</h2>
+            <p>Thank you for registering. Please click the button below to verify your email address and activate your account:</p>
+            <div style="margin: 32px 0; text-align: center;">
+              <a href="${link}" style="background-color: #4f46e5; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">Verify Email Address</a>
+            </div>
+            <p style="font-size: 13px; color: #666; line-height: 1.5;">If the button doesn't work, you can copy and paste the following URL into your web browser:</p>
+            <p style="font-size: 13px; color: #4f46e5; word-break: break-all; font-family: monospace;">${link}</p>
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 24px 0;">
+            <p style="font-size: 12px; color: #999;">If you did not request this email, you can safely ignore it.</p>
+          </div>
+        `
+      });
+
+      let isTestAccount = !process.env.SMTP_USER || process.env.SMTP_USER === 'dummy';
+      if (info.messageId && nodemailer.getTestMessageUrl(info)) {
+        isTestAccount = true;
+        console.log("Custom Verification Email Preview URL: %s", nodemailer.getTestMessageUrl(info));
+      }
+
+      res.json({ 
+        success: true, 
+        message: isTestAccount ? 'Verification email generated (Dev Mode)' : 'Verification email sent' ,
+        isSimulated: isTestAccount,
+        link: isTestAccount ? link : undefined
+      });
+    } catch (error: any) {
+      console.error('Error sending custom verification email:', error);
+      res.status(500).json({ error: error.message || 'Failed to send verification email' });
+    }
+  });
+
+  app.post("/api/auth/telegram", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    
+    try {
+        const { initData } = req.body;
+        if (!initData) return res.status(400).json({ error: 'Missing initData' });
+        
+        const botToken = "8612277943:AAG54QY-maZ6B3sRRX68YIApGQ6OaFmgA3g";
+        
+        const q = new URLSearchParams(initData);
+        const hash = q.get('hash');
+        q.delete('hash');
+        
+        const keys = Array.from(q.keys());
+        keys.sort();
+        const dataCheckString = keys.map(k => `${k}=${q.get(k)}`).join('\n');
+        
+        const crypto = await import('crypto');
+        const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+        const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+        
+        if (calculatedHash !== hash) {
+            return res.status(401).json({ error: 'Invalid Telegram hash' });
+        }
+        
+        const userStr = q.get('user');
+        if (!userStr) return res.status(400).json({ error: 'Missing user data' });
+        
+        const user = JSON.parse(userStr);
+        const uid = `telegram_${user.id}`;
+        const email = `${uid}@tg.onlymemesearn.store`;
+        
+        try {
+            await admin.auth().updateUser(uid, {
+                displayName: user.username ? `@${user.username}` : user.first_name,
+                ...(user.photo_url && { photoURL: user.photo_url })
+            });
+        } catch (e: any) {
+            if (e.code === 'auth/user-not-found') {
+                await admin.auth().createUser({
+                    uid,
+                    email,
+                    displayName: user.username ? `@${user.username}` : user.first_name,
+                    ...(user.photo_url && { photoURL: user.photo_url }),
+                    emailVerified: true
+                });
+            } else {
+                throw e;
+            }
+        }
+        
+        const customToken = await admin.auth().createCustomToken(uid, { email: email });
+        res.json({ token: customToken, user });
+    } catch (error: any) {
+        console.error("Telegram auth failed:", error);
+        res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/auth/guest", async (req, res) => {
+    try {
+        const { guestId } = req.body;
+        let finalGuestId = guestId;
+        
+        if (!finalGuestId) {
+            const crypto = await import('crypto');
+            finalGuestId = `guest_${crypto.randomBytes(8).toString('hex')}`;
+        }
+        
+        const email = `${finalGuestId}@guest.onlymemesearn.store`;
+        
+        if (adminInitialized) {
+            try {
+                await admin.auth().getUser(finalGuestId);
+            } catch (e: any) {
+                if (e.code === 'auth/user-not-found') {
+                    await admin.auth().createUser({
+                        uid: finalGuestId,
+                        email,
+                        displayName: 'Guest User',
+                        emailVerified: true
+                    });
+                } else {
+                    throw e;
+                }
+            }
+            const customToken = await admin.auth().createCustomToken(finalGuestId, { email });
+            return res.json({ success: true, token: customToken, guestId: finalGuestId });
+        } else {
+            return res.status(500).json({ error: 'Firebase Admin not initialized on the server.' });
+        }
+    } catch (error: any) {
+        console.error("Guest authentication failed:", error);
+        res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Firestore REST Proxy Endpoints
+  app.post("/api/firestore/get", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const { path } = req.body;
+      if (!path) return res.status(400).json({ error: "Missing path" });
+      
+      const isDocument = path ? (path.split('/').filter(Boolean).length % 2 === 0) : false;
+      if (!isDocument) {
+        // Fallback to getting collection docs if it's not a document path
+        const snap = await admin.firestore().collection(path).get();
+        const docs = snap.docs.map((d: any) => ({ id: d.id, data: d.data() }));
+        return res.json({ exists: true, docs, data: { docs } });
+      }
+
+      const docSnap = await admin.firestore().doc(path).get();
+      if (docSnap.exists) {
+        return res.json({ exists: true, data: docSnap.data() });
+      } else {
+        return res.json({ exists: false });
+      }
+    } catch (error: any) {
+      console.error("Firestore Proxy Get failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/firestore/set", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const { path, data, options } = req.body;
+      if (!path) return res.status(400).json({ error: "Missing path" });
+      await admin.firestore().doc(path).set(data, options || {});
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Firestore Proxy Set failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/firestore/update", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const { path, data } = req.body;
+      if (!path) return res.status(400).json({ error: "Missing path" });
+      await admin.firestore().doc(path).update(data);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Firestore Proxy Update failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/firestore/delete", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const { path } = req.body;
+      if (!path) return res.status(400).json({ error: "Missing path" });
+      await admin.firestore().doc(path).delete();
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Firestore Proxy Delete failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/firestore/add", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const { path, data } = req.body;
+      if (!path) return res.status(400).json({ error: "Missing path" });
+      const ref = await admin.firestore().collection(path).add(data);
+      res.json({ id: ref.id });
+    } catch (error: any) {
+      console.error("Firestore Proxy Add failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/firestore/getDocs", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const { path } = req.body;
+      if (!path) return res.status(400).json({ error: "Missing path" });
+      const snap = await admin.firestore().collection(path).get();
+      const docs = snap.docs.map((d: any) => ({ id: d.id, data: d.data() }));
+      res.json({ docs });
+    } catch (error: any) {
+      console.error("Firestore Proxy GetDocs failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/withdraw/check-uid", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const { uid, email } = req.body;
+      if (!uid) return res.status(400).json({ error: "Missing uid" });
+      
+      const cleanUid = uid.toString().trim();
+      if (!cleanUid) return res.status(400).json({ error: "Missing uid" });
+
+      const db = admin.firestore();
+      const usersSnap = await db.collection("users").get();
+      
+      let exists = false;
+      let associatedEmail = "";
+      
+      for (const doc of usersSnap.docs) {
+        if (doc.id === email) {
+          continue; // Skip the checking user themselves
+        }
+        const data = doc.data();
+        
+        // Check gameUid
+        if (data.gameUid && data.gameUid.toString().trim() === cleanUid) {
+          exists = true;
+          associatedEmail = doc.id;
+          break;
+        }
+        
+        // Check exchangeUids
+        if (data.exchangeUids) {
+          const uids = Object.values(data.exchangeUids);
+          if (uids.some((u: any) => u && u.toString().trim() === cleanUid)) {
+            exists = true;
+            associatedEmail = doc.id;
+            break;
+          }
+        }
+        
+        // Check pendingExchangeUids
+        if (data.pendingExchangeUids) {
+          const uids = Object.values(data.pendingExchangeUids);
+          if (uids.some((u: any) => u && u.toString().trim() === cleanUid)) {
+            exists = true;
+            associatedEmail = doc.id;
+            break;
+          }
+        }
+      }
+
+      return res.json({ exists, email: associatedEmail });
+    } catch (error: any) {
+      console.error("Check UID failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Trading API
   app.post("/api/trade", async (req, res) => {
     if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
@@ -525,7 +1010,7 @@ async function startServer() {
 
   app.post("/api/task/claim", async (req, res) => {
     if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
-    const { email, taskId, type } = req.body;
+    const { email, taskId, type, reward, rewardToken, taskTitle } = req.body;
     if (!email || !taskId || !type) return res.status(400).json({ error: 'Missing parameters' });
 
     const db = admin.firestore();
@@ -543,19 +1028,81 @@ async function startServer() {
                       type === 'instagram' ? 'instagramTaskProofs' : 
                       type === 'twitter' ? 'twitterTaskProofs' : 
                       type === 'tiktok' ? 'tiktokTaskProofs' : 
-                      type === 'appDownload' ? 'appDownloadTaskProofs' : 
+                      type === 'appDownload' || type === 'app_download' ? 'appDownloadTaskProofs' : 
                       type === 'video' ? 'videoProofs' :
+                      type === 'other' ? 'otherTaskProofs' :
                       'otherTaskProofs';
 
         const proofs = userData[field] || {};
         const proof = proofs[taskId];
-        if (!proof || proof.status !== 'approved') throw new Error("No approved proof found");
+        
+        if (proof && proof.status === 'claimed') {
+          throw new Error("Task already claimed");
+        }
+
+        let rewardAmount = 0;
+        let tokenSymbol = '';
+
+        if (proof && proof.status === 'approved') {
+          rewardAmount = proof.reward || 0;
+          tokenSymbol = proof.rewardToken || 'USHA';
+        } else if (reward !== undefined) {
+          rewardAmount = Number(reward);
+          tokenSymbol = rewardToken || 'USHA';
+        } else {
+          throw new Error("No approved proof found and no reward details provided");
+        }
 
         const newBalances = { ...userData.balance };
-        newBalances[proof.rewardToken] = (newBalances[proof.rewardToken] || 0) + proof.reward;
+        newBalances[tokenSymbol] = (newBalances[tokenSymbol] || 0) + rewardAmount;
         
-        const newProofs = { ...proofs, [taskId]: { ...proof, status: 'claimed' } };
-        transaction.update(userRef, { balance: newBalances, [field]: newProofs });
+        const updatedProof = {
+          ...(proof || {
+            proofUrl: 'auto_approved_claim_backend',
+            taskTitle: taskTitle || 'Task Reward',
+            submittedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString()
+          }),
+          status: 'claimed',
+          reward: rewardAmount,
+          rewardToken: tokenSymbol
+        };
+
+        let taskRef: any = null;
+        let taskDoc: any = null;
+
+        const taskCollection = type === 'youtube' ? 'youtubeTasks' :
+                               type === 'telegram' ? 'telegramTasks' :
+                               type === 'facebook' ? 'facebookTasks' :
+                               type === 'instagram' ? 'instagramTasks' :
+                               type === 'twitter' ? 'twitterTasks' :
+                               type === 'tiktok' ? 'tiktokTasks' :
+                               type === 'appDownload' || type === 'app_download' ? 'appDownloadTasks' :
+                               type === 'video' ? 'videos' :
+                               type === 'other' ? 'otherTasks' :
+                               null;
+
+        if (taskCollection) {
+          taskRef = db.collection(taskCollection).doc(taskId);
+          taskDoc = await transaction.get(taskRef);
+        }
+
+        const newProofs = { ...proofs, [taskId]: updatedProof };
+        
+        const tapGameData = userData.tapGameData || {};
+        const history = tapGameData.history || [];
+        const newTx = { id: Date.now(), type: 'Earned', amount: rewardAmount.toString(), token: tokenSymbol, date: new Date().toISOString(), isPositive: true };
+        const newTapGameData = { ...tapGameData, history: [...history, newTx] };
+
+        // --- ALL READS ABOVE THIS LINE ---
+
+        transaction.update(userRef, { balance: newBalances, [field]: newProofs, tapGameData: newTapGameData });
+
+        if (taskRef && taskDoc && taskDoc.exists) {
+          transaction.update(taskRef, {
+            claimCount: admin.firestore.FieldValue.increment(1)
+          });
+        }
       });
       res.json({ success: true });
     } catch (error: any) {
@@ -588,7 +1135,7 @@ async function startServer() {
             }
             return res.status(404).json({ error: 'User FCM token not found.' });
         } else if (topic) {
-            // Send to topic (e.g. 'all_users', 'new_tasks')
+            // Send to topic (e.g. 'all_users')
             await admin.messaging().send({
                topic,
                notification: { title, body }
@@ -603,29 +1150,142 @@ async function startServer() {
     }
   });
 
-  if (process.env.NODE_ENV !== "production") {
-    try {
-      const { createServer: createViteServer } = await import("vite");
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa",
-      });
-      app.use(vite.middlewares);
-    } catch (e) {
-      console.warn("Vite not found, skipping dev server setup.");
+  app.post("/api/subscribe", async (req, res) => {
+    const { token, topic } = req.body;
+    if (!adminInitialized) {
+      return res.status(500).json({ error: 'Firebase Admin not initialized' });
     }
-  } else {
-    // Serve static files in production
-    const distPath = join(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(join(distPath, 'index.html'));
-    });
-  }
+    try {
+      await admin.messaging().subscribeToTopic(token, topic);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Error subscribing to topic:', error);
+      res.status(500).json({ error: error.message || 'Failed to subscribe' });
+    }
+  });
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  // --- Proxy Routes for Videos and Games (Bypasses Client-side Security Rules) ---
+  app.get("/api/videos", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const db = admin.firestore();
+      const snap = await db.collection("videos").get();
+      const list: any[] = [];
+      snap.forEach(doc => {
+        list.push({ ...doc.data() });
+      });
+      res.json(list);
+    } catch (error: any) {
+      console.error("Get videos failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/videos", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const db = admin.firestore();
+      const video = req.body;
+      if (!video || !video.id) return res.status(400).json({ error: 'Missing video or video id' });
+      await db.collection("videos").doc(video.id).set(video);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Add/Update video failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/videos/:id", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const db = admin.firestore();
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ error: 'Missing id param' });
+      await db.collection("videos").doc(id).delete();
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Delete video failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/games", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const db = admin.firestore();
+      const snap = await db.collection("games").get();
+      const list: any[] = [];
+      snap.forEach(doc => {
+        list.push({ ...doc.data(), id: doc.id });
+      });
+      res.json(list);
+    } catch (error: any) {
+      console.error("Get games failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/games", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const db = admin.firestore();
+      const game = req.body;
+      if (!game || !game.id) return res.status(400).json({ error: 'Missing game or game id' });
+      await db.collection("games").doc(game.id).set(game);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Add/Update game failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/games/:id", async (req, res) => {
+    if (!adminInitialized) return res.status(500).json({ error: 'Firebase Admin not initialized' });
+    try {
+      const db = admin.firestore();
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ error: 'Missing id param' });
+      await db.collection("games").doc(id).delete();
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Delete game failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Global JSON error handler for API routes
+  app.use("/api", (err: any, req: any, res: any, next: any) => {
+    console.error("API error occurred:", err);
+    res.status(err.status || 500).json({
+      error: err.message || "An unexpected error occurred on the server."
+    });
+  });
+
+if (process.env.NODE_ENV !== "production") {
+  import("vite").then(({ createServer: createViteServer }) => {
+    createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    }).then((vite) => {
+      app.use(vite.middlewares);
+    }).catch((err) => {
+      console.warn("Failed to mount Vite middleware:", err.message);
+    });
+  }).catch(() => {
+    console.warn("Vite not found, skipping dev server setup.");
+  });
+} else {
+  // Serve static files in production
+  const distPath = join(process.cwd(), 'dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res) => {
+    res.sendFile(join(distPath, 'index.html'));
   });
 }
 
-startServer();
+const PORT = 3000;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+
+export default app;

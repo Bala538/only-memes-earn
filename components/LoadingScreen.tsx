@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 const LoadingScreen: React.FC = () => {
   return (
@@ -7,7 +7,9 @@ const LoadingScreen: React.FC = () => {
             OnlyMemes
         </div>
       <div className="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
-      <p className="text-gray-600 dark:text-white mt-4">Loading...</p>
+      <p className="text-gray-600 dark:text-white mt-4 font-medium transition-opacity duration-300">
+        Loading...
+      </p>
     </div>
   );
 };

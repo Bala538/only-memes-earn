@@ -6,7 +6,6 @@ import HistoryIcon from './icons/HistoryIcon';
 import { Proof } from '../types';
 import VideoIcon from './icons/VideoIcon';
 import { YouTubeIcon } from './icons/YouTubeIcon';
-import TelegramIcon from './icons/TelegramIcon';
 import FacebookIcon from './icons/FacebookIcon';
 import InstagramIcon from './icons/InstagramIcon';
 import TwitterIcon from './icons/TwitterIcon';
@@ -22,7 +21,7 @@ import { requestNotificationPermission, db, doc, setDoc } from '../firebaseConfi
 import AboutModal from './AboutModal';
 import RewardClaimedModal from './RewardClaimedModal';
 
-type TaskType = 'video' | 'youtube' | 'telegram' | 'facebook' | 'instagram' | 'twitter' | 'tiktok' | 'app_download' | 'other';
+type TaskType = 'video' | 'youtube' | 'facebook' | 'instagram' | 'twitter' | 'tiktok' | 'app_download' | 'other';
 
 const ProofStatusBadge: React.FC<{ status: Proof['status'] }> = ({ status }) => {
     const statusStyles = {
@@ -52,7 +51,6 @@ const TaskTypeIcon: React.FC<{ type: TaskType }> = ({ type }) => {
     switch (type) {
         case 'video': return <VideoIcon className="w-5 h-5 text-gray-400" />;
         case 'youtube': return <YouTubeIcon className="w-5 h-5 text-red-500" />;
-        case 'telegram': return <TelegramIcon className="w-5 h-5 text-blue-500" />;
         case 'facebook': return <FacebookIcon className="w-5 h-5" />;
         case 'instagram': return <InstagramIcon className="w-5 h-5" />;
         case 'twitter': return <TwitterIcon className="w-5 h-5 text-sky-500" />;
@@ -66,6 +64,42 @@ const TaskTypeIcon: React.FC<{ type: TaskType }> = ({ type }) => {
 const ProfileView: React.FC = () => {
     const { state, redeemPromoCode, toggleTheme, submitAirdropAddress, updateProfile } = useContext(AppContext);
     const { currentUser, theme, airdropConfig } = state;
+
+    const exchangeVerificationList = useMemo(() => {
+        const availableExchanges = (state.exchanges || []).filter((e: any) => e.enabled).map((e: any) => e.name);
+        const list = availableExchanges.length > 0 ? availableExchanges : ['BYBIT', 'BINANCE', 'OKX', 'LBank', 'MEXC'];
+        
+        return list.map(exchange => {
+            const verifiedUid = currentUser?.exchangeUids?.[exchange];
+            const isPending = !!(
+                currentUser?.gameUid && 
+                currentUser?.pendingExchange === exchange && 
+                !verifiedUid
+            );
+            
+            let uidToDisplay = '';
+            let status: 'verified' | 'pending' | 'unlinked' = 'unlinked';
+            
+            if (verifiedUid) {
+                uidToDisplay = verifiedUid;
+                status = 'verified';
+            } else if (isPending) {
+                uidToDisplay = currentUser?.gameUid || '';
+                status = 'pending';
+            } else if (currentUser?.isUidVerified && currentUser?.gameUid && (!currentUser?.exchangeUids || Object.keys(currentUser.exchangeUids).length === 0)) {
+                if (currentUser?.pendingExchange === exchange || !currentUser?.pendingExchange) {
+                    uidToDisplay = currentUser?.gameUid || '';
+                    status = 'verified';
+                }
+            }
+            
+            return {
+                exchange,
+                uid: uidToDisplay,
+                status
+            };
+        });
+    }, [currentUser, state.exchanges]);
 
     const [promoCode, setPromoCode] = useState('');
     const [promoStatus, setPromoStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
@@ -84,8 +118,14 @@ const ProfileView: React.FC = () => {
         const token = await requestNotificationPermission();
         if (token && currentUser) {
             try {
-                const userFCMRef = doc(db, 'users', currentUser.uid, 'fcm', 'token');
+                const userFCMRef = doc(db, 'users', currentUser.email, 'fcm', 'token');
                 await setDoc(userFCMRef, { token, updatedAt: Date.now() }, { merge: true });
+                // Subscribe to all_users topic
+                await fetch('/api/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token, topic: 'all_users' })
+                });
                 setNotificationStatus('enabled');
             } catch (err) {
                 console.error("Error saving token", err);
@@ -148,7 +188,9 @@ const ProfileView: React.FC = () => {
     const hasEarnings = Object.keys(earnedTokens).length > 0;
 
     const displayEmail = currentUser.email || 'User';
-    const displayInitial = (currentUser.displayName || displayEmail).charAt(0).toUpperCase();
+    const rawName = currentUser.displayName || displayEmail;
+    const cleanName = rawName.startsWith('@') ? rawName.slice(1) : rawName;
+    const displayInitial = cleanName.charAt(0).toUpperCase();
 
     const [isEditingProfile, setIsEditingProfile] = useState(false);
     const [editDisplayName, setEditDisplayName] = useState(currentUser.displayName || '');
@@ -294,7 +336,9 @@ const ProfileView: React.FC = () => {
                                 {displayInitial}
                             </div>
                         )}
-                        <h2 className="text-xl font-bold text-gray-900 dark:text-white">{currentUser.displayName || displayEmail}</h2>
+                        <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                            {currentUser.displayName || displayEmail}
+                        </h2>
                         {currentUser.displayName && (
                             <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">{displayEmail}</p>
                         )}
@@ -330,10 +374,84 @@ const ProfileView: React.FC = () => {
                             <div>
                                 <p className="text-2xl font-bold text-gray-900 dark:text-white">0</p>
                                 <p className="text-sm text-gray-500">Rewards Earned</p>
-                            </div>
+                             </div>
                         )}
                     </div>
                 </div>
+            </div>
+
+            {/* Linked Exchange UIDs Section */}
+            <div className="bg-white dark:bg-[#161B22] rounded-md shadow-sm p-4 border border-gray-100 dark:border-gray-700">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2 text-gray-400">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                    </svg>
+                    Linked Exchange Accounts
+                </h3>
+                
+                <div className="space-y-3">
+                    {exchangeVerificationList.map(({ exchange, uid, status }) => (
+                        <div key={exchange} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/40 rounded-lg border border-gray-100 dark:border-gray-800">
+                            <div>
+                                <span className="text-xs text-gray-400 dark:text-gray-500 font-medium block">{exchange} Account</span>
+                                <span className="font-mono font-bold text-gray-800 dark:text-gray-200 text-sm">
+                                    {uid || 'Not Linked'}
+                                </span>
+                            </div>
+                            
+                            <div className="flex items-center space-x-2">
+                                {status === 'verified' && (
+                                    <span className="text-xs font-bold bg-green-500/15 text-green-600 dark:text-green-400 border border-green-500/25 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                        Verified
+                                    </span>
+                                )}
+                                
+                                {status === 'pending' && (
+                                    <div className="relative group flex items-center">
+                                        <span className="text-xs font-bold bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 border border-yellow-500/25 px-2.5 py-1 rounded-full flex items-center gap-1 cursor-help">
+                                            <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
+                                            Pending Verification
+                                        </span>
+                                        
+                                        {/* Hover Tooltip */}
+                                        <div className="absolute right-0 bottom-full mb-2 hidden group-hover:flex flex-col items-center z-50">
+                                            <div className="w-64 bg-gray-950 dark:bg-zinc-800 text-white text-[11px] rounded-lg p-3 shadow-xl border border-gray-700 dark:border-gray-600 leading-relaxed text-center">
+                                                Verification for {exchange} is pending admin approval. You must wait for admin approval to proceed with withdrawals.
+                                            </div>
+                                            <div className="w-3 h-3 bg-gray-950 dark:bg-zinc-800 rotate-45 -mt-1.5 border-r border-b border-gray-700 dark:border-gray-600"></div>
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                {status === 'unlinked' && (
+                                    <div className="relative group flex items-center">
+                                        <span className="text-xs font-bold bg-gray-500/15 text-gray-400 dark:text-gray-500 border border-gray-300 dark:border-gray-800 px-2.5 py-1 rounded-full flex items-center gap-1 cursor-help">
+                                            Unverified
+                                        </span>
+                                        
+                                        {/* Hover Tooltip */}
+                                        <div className="absolute right-0 bottom-full mb-2 hidden group-hover:flex flex-col items-center z-50">
+                                            <div className="w-64 bg-gray-950 dark:bg-zinc-800 text-white text-[11px] rounded-lg p-3 shadow-xl border border-gray-700 dark:border-gray-600 leading-relaxed text-center">
+                                                Please submit your UID and screenshot in the Withdraw section to verify {exchange} and unlock withdrawals.
+                                            </div>
+                                            <div className="w-3 h-3 bg-gray-950 dark:bg-zinc-800 rotate-45 -mt-1.5 border-r border-b border-gray-700 dark:border-gray-600"></div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                
+                {exchangeVerificationList.some(item => item.status !== 'verified') && (
+                    <div className="text-xs text-yellow-500 flex items-start gap-1.5 bg-yellow-500/5 p-3 rounded-lg border border-yellow-500/10 leading-relaxed mt-4">
+                        <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>If any exchange account is unverified or pending, go to the <strong>Withdraw</strong> section of your wallet to submit your UID for that specific exchange.</span>
+                    </div>
+                )}
             </div>
 
             {/* Airdrop Section */}

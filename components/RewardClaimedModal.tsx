@@ -1,8 +1,9 @@
 
-import React, { useContext } from 'react';
+import React, { useContext, useEffect } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Token } from '../types';
 import TokenIcon from './icons/TokenIcon';
+import confetti from 'canvas-confetti';
 
 // A self-drawing checkmark icon for a more polished animation
 const AnimatedCheckCircleIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -26,6 +27,17 @@ interface RewardClaimedModalProps {
 const RewardClaimedModal: React.FC<RewardClaimedModalProps> = ({ isOpen, onClose, reward, token }) => {
     const { state } = useContext(AppContext);
     
+    useEffect(() => {
+        if (isOpen) {
+            confetti({
+                particleCount: 150,
+                spread: 80,
+                origin: { y: 0.6 },
+                zIndex: 9999
+            });
+        }
+    }, [isOpen]);
+
     if (!isOpen) return null;
 
     const tokenName = state.tokenConfigs[token]?.name || token;

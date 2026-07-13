@@ -121,6 +121,15 @@ const App: React.FC = () => {
     const isOnline = useOnlineStatus();
 
     React.useEffect(() => {
+        // Parse 'ref' parameter from URL immediately and save to localStorage
+        if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search);
+            const refCode = params.get('ref');
+            if (refCode) {
+                localStorage.setItem('pending_referral_code', refCode.trim().toUpperCase());
+            }
+        }
+
         CapApp.addListener('backButton', ({ canGoBack }) => {
             if (!canGoBack) {
                 CapApp.exitApp();

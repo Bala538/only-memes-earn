@@ -31,6 +31,23 @@ const ReferralView: React.FC = () => {
     const [loadingReferrals, setLoadingReferrals] = useState(true);
 
     useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search);
+            const urlRefCode = params.get('ref');
+            if (urlRefCode) {
+                const cleanedCode = urlRefCode.trim().toUpperCase();
+                setFriendCode(cleanedCode);
+                localStorage.setItem('pending_referral_code', cleanedCode);
+            } else {
+                const storedRefCode = localStorage.getItem('pending_referral_code');
+                if (storedRefCode) {
+                    setFriendCode(storedRefCode);
+                }
+            }
+        }
+    }, []);
+
+    useEffect(() => {
         const fetchReferrals = async () => {
             if (!currentUser?.email) return;
             try {
@@ -53,7 +70,7 @@ const ReferralView: React.FC = () => {
     if (!currentUser) return null;
 
     const copyToClipboard = () => {
-        const text = `Join me on Only Memes Earn! Use my code ${currentUser.referralCode} to get started.`;
+        const text = `Join me on Only Memes Earn! Use my code ${currentUser.referralCode} to get started. https://onlymemesearn.store/?ref=${currentUser.referralCode}`;
         
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(text).then(() => {
@@ -92,7 +109,7 @@ const ReferralView: React.FC = () => {
         const shareData = {
             title: 'Only Memes Earn',
             text: `Join me on Only Memes Earn! Use my code ${currentUser.referralCode} to get started.`,
-            url: window.location.origin
+            url: `https://onlymemesearn.store/?ref=${currentUser.referralCode}`
         };
         
         if (navigator.share) {

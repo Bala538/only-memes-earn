@@ -40,6 +40,18 @@ fi
 echo -e "${YELLOW}Installing and verifying dependencies (this ensures everything is up-to-date)...${NC}"
 npm install || { echo -e "${RED}❌ npm install failed! Check errors.${NC}"; exit 1; }
 
+# Force-verify essential dependencies
+if [ ! -d "node_modules/canvas-confetti" ]; then
+    echo -e "${YELLOW}⚠️ canvas-confetti not found in node_modules. Attempting explicit installation...${NC}"
+    npm install canvas-confetti || echo -e "${RED}⚠️ Explicit canvas-confetti installation failed, proceeding anyway...${NC}"
+fi
+
+# Clear Vite cache to avoid stale pre-bundled files
+if [ -d "node_modules/.vite" ]; then
+    echo -e "${YELLOW}Clearing Vite cache...${NC}"
+    rm -rf node_modules/.vite
+fi
+
 # 4. Build the application
 echo -e "${YELLOW}Building the static applet...${NC}"
 npm run build
@@ -47,6 +59,11 @@ if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ Build succeeded! Assets compiled in dist/${NC}"
 else
     echo -e "${RED}❌ Build failed! Please check your source files.${NC}"
+    echo -e "${YELLOW}👉 If you see dependency resolution errors (like 'failed to resolve import \"canvas-confetti\"'),${NC}"
+    echo -e "${YELLOW}running this command in Termux usually fixes it by forcing a fresh clean install of all packages:${NC}"
+    echo -e ""
+    echo -e "    ${BLUE}rm -rf node_modules package-lock.json && npm cache clean --force && npm install${NC}"
+    echo -e ""
     exit 1
 fi
 
